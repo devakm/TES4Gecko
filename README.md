@@ -1,3 +1,5 @@
+Download release 15.2 from https://www.nexusmods.com/oblivion/mods/8665
+
 -------------------------
 TES4Gecko - Version 15.2
 -------------------------
