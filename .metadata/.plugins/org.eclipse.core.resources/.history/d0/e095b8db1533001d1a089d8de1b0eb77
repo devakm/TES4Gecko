@@ -1,0 +1,810 @@
+package TES4Gecko;
+
+import java.io.IOException;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+
+/**
+ * The data for a plugin record consists of one or more plugin subrecords.
+ */
+public class PluginSubrecord extends SerializedElement {
+    
+    /** Record type */
+    private String recordType;
+    
+    /** Subrecord type */
+    private String subrecordType;
+    
+    /** Subrecord spill mode */
+    private boolean spillMode = false;
+    
+    /** Subrecord position */
+    private long subrecordPosition = -1;
+    
+    /** Subrecord data length */
+    private int subrecordLength;
+    
+    /** Subrecord data */
+    private byte[] subrecordData;
+    
+    /** Subrecord lookup table */
+    private static Map<String, SubrecordInfo> typeMap;
+
+    /** Function lookup table */
+    private static Map<Integer, FunctionInfo> functionMap;
+
+    /** 4-byte array of repeating references */
+    private static final int[] offsetRepeating4 = {-4};
+
+    /** 8-byte array of repeating references */
+    private static final int[] offsetRepeating8 = {-8};
+
+    /** 12-byte array of repeating references */
+    private static final int[] offsetRepeating12 = {-12};
+
+    /** 52-byte array of repeating references */
+    private static final int[] offsetRepeating52 = {-52};
+
+    /** Single reference at offset 0 */
+    private static final int[] offsetZero = {0};
+
+    /** Single reference at offset 4 */
+    private static final int[] offsetFour = {4};
+
+    /** Two references at offsets 0 and 4 */
+    private static final int[] offsetZeroFour = {0, 4};
+
+    /** Two references at offsets 12 and 16 */
+    private static final int[] offsetTwelveSixteen = {12, 16};
+
+    /** 
+     * Subrecord types containing simple references
+     */
+    private static final SubrecordInfo[] subrecordInfo =
+        {new SubrecordInfo("ANAM", offsetZero, "DOOR"),
+         new SubrecordInfo("ATXT", offsetZero, "LAND"),
+         new SubrecordInfo("BNAM", offsetZero, "DOOR"),
+         new SubrecordInfo("BTXT", offsetZero, "LAND"), 
+         new SubrecordInfo("CNAM", offsetZero, "NPC_", "WRLD"), 
+         new SubrecordInfo("CNTO", offsetZero),
+         new SubrecordInfo("CSCR", offsetZero, "CREA"), 
+         new SubrecordInfo("CSDI", offsetZero, "CREA"),
+         new SubrecordInfo("DATA", offsetRepeating4, "ANIO", "IDLE"),
+         new SubrecordInfo("DNAM", offsetZeroFour, "RACE"), 
+         new SubrecordInfo("VNAM", offsetZeroFour, "RACE"), 
+         new SubrecordInfo("ENAM", offsetRepeating4, "AMMO", "ARMO", "BOOK", "CLOT", "NPC_", "RACE", "WEAP"),
+         new SubrecordInfo("GNAM", offsetZero, "LTEX"), 
+         new SubrecordInfo("HNAM", offsetRepeating4, "NPC_", "RACE"),
+         new SubrecordInfo("INAM", offsetZero, "CREA", "NPC_"),
+         new SubrecordInfo("LNAM", offsetZero, "LSCR"),
+         new SubrecordInfo("LVLO", offsetFour, "LVLC", "LVLI", "LVSP"),
+         new SubrecordInfo("NAME", offsetZero),
+         new SubrecordInfo("NAM2", offsetZero, "WRLD"), 
+         new SubrecordInfo("PFIG", offsetZero, "FLOR"), 
+         new SubrecordInfo("PKID", offsetZero),
+         new SubrecordInfo("PNAM", offsetZero, "INFO"),
+         new SubrecordInfo("PGRL", offsetZero, "PGRD"),
+         new SubrecordInfo("QNAM", offsetZero, "CONT"), 
+         new SubrecordInfo("QSTA", offsetZero, "QUST"), 
+         new SubrecordInfo("QSTI", offsetZero), 
+         new SubrecordInfo("RDSD", offsetRepeating12, "REGN"),
+         new SubrecordInfo("RDOT", offsetRepeating52, "REGN"),
+         new SubrecordInfo("RDWT", offsetRepeating8, "REGN"),
+         new SubrecordInfo("RNAM", offsetZero, "NPC_"),
+         new SubrecordInfo("SCIT", offsetZero, "ENCH", "INGR", "SPEL"),
+         new SubrecordInfo("SCRI", offsetZero),
+         new SubrecordInfo("SCRO", offsetZero),
+         new SubrecordInfo("SNAM", offsetZero, "ACTI", "CONT", "CREA", "DOOR", "LIGH", "NPC_", "WATR", "WRLD", "WTHR"), 
+         new SubrecordInfo("SPLO", offsetZero),
+         new SubrecordInfo("TCLF", offsetZero, "INFO"), 
+         new SubrecordInfo("TCLT", offsetZero, "INFO"), 
+         new SubrecordInfo("TNAM", offsetZero, "DOOR", "LVLC"), 
+         new SubrecordInfo("VNAM", offsetZeroFour, "RACE"), 
+         new SubrecordInfo("WLST", offsetRepeating8, "CLMT"),
+         new SubrecordInfo("WNAM", offsetZero, "REGN", "WRLD"), 
+         new SubrecordInfo("XCCM", offsetZero, "CELL"),
+         new SubrecordInfo("XCLR", offsetRepeating4, "CELL"),
+         new SubrecordInfo("XCWT", offsetZero, "CELL"), 
+         new SubrecordInfo("XESP", offsetZero), 
+         new SubrecordInfo("XGLB", offsetZero), 
+         new SubrecordInfo("XHRS", offsetZero, "ACHR"),
+         new SubrecordInfo("XLOC", offsetFour, "REFR"),
+         new SubrecordInfo("XMRC", offsetZero, "ACHR"), 
+         new SubrecordInfo("XNAM", offsetZero, "FACT", "RACE"), 
+         new SubrecordInfo("XOWN", offsetZero), 
+         new SubrecordInfo("XPCI", offsetZero), 
+         new SubrecordInfo("XRTM", offsetZero, "REFR"), 
+         new SubrecordInfo("XTEL", offsetZero, "REFR"),
+         new SubrecordInfo("ZNAM", offsetZero)
+    };
+
+    /** 
+     * Subrecord data types (mapped string).
+     */
+    private static final String[][] subrecordDataTypes =
+        {
+    	
+    };
+
+    /**
+     * Script functions containing references
+     */
+    private static final FunctionInfo[] functionInfo = {
+         new FunctionInfo("GetCrime", 0x07a, true, false),
+         new FunctionInfo("GetDeadCount", 0x054, true, false),
+         new FunctionInfo("GetDetected", 0x02d, true, false),
+         new FunctionInfo("GetDetectionLevel", 0x0b4, true, false),
+         new FunctionInfo("GetDisposition", 0x04c, true, false),
+         new FunctionInfo("GetDistance", 0x01,  true, false),
+         new FunctionInfo("GetEquipped", 0x0b6, true, false),
+         new FunctionInfo("GetFactionRank", 0x049, true, false),
+         new FunctionInfo("GetFactionRankDifference", 0x03c, true, true),
+         new FunctionInfo("GetFriendHit", 0x120, true, false),
+         new FunctionInfo("GetGlobalValue", 0x04a, true, false),
+         new FunctionInfo("GetHeadingAngle", 0x063, true, false),
+         new FunctionInfo("GetInCell", 0x043, true, false),
+         new FunctionInfo("GetInCellParam", 0x0e6, true, true),
+         new FunctionInfo("GetInFaction", 0x047, true, false),
+         new FunctionInfo("GetInSameCell", 0x020, true, false),
+         new FunctionInfo("GetInWorldspace", 0x136, true, false),
+         new FunctionInfo("GetIsClass", 0x044, true, false),
+         new FunctionInfo("GetIsClassDefault", 0x0e4, true, false),
+         new FunctionInfo("GetIsCurrentPackage", 0x0a1, true, false),
+         new FunctionInfo("GetIsCurrentWeather", 0x095, true, false),
+         new FunctionInfo("GetIsID", 0x048, true, false),
+         new FunctionInfo("GetIsPlayerBirthsign", 0x0e0, true, false),
+         new FunctionInfo("GetIsRace", 0x045, true, false),
+         new FunctionInfo("GetIsReference", 0x088, true, false),
+         new FunctionInfo("GetIsSex", 0x046, false, false),
+         new FunctionInfo("GetIsUsedItem", 0x0f6, true, false),
+         new FunctionInfo("GetItemCount", 0x02f, true, false),
+         new FunctionInfo("GetLineOfSight", 0x01b, true, false),
+         new FunctionInfo("GetPCExpelled", 0x0c1, true, false),
+         new FunctionInfo("GetPCFactionAttack", 0x0c7, true, false),
+         new FunctionInfo("GetPCFactionMurder", 0x0c3, true, false),
+         new FunctionInfo("GetPCFactionSteal", 0x0c5, true, false),
+         new FunctionInfo("GetPCFactionSubmitAuthority", 0x0c9, true, false),
+         new FunctionInfo("GetPCInFaction", 0x084, true, false),
+         new FunctionInfo("GetPCIsClass", 0x081, true, false),
+         new FunctionInfo("GetPCIsRace", 0x082, true, false),
+         new FunctionInfo("GetQuestRunning", 0x038, true, false),
+         new FunctionInfo("GetQuestVariable", 0x04f, true, false),
+         new FunctionInfo("GetScriptVariable", 0x035, true, false),
+         new FunctionInfo("GetShouldAttack", 0x042, true, false),
+         new FunctionInfo("GetStage", 0x03a, true, false),
+         new FunctionInfo("GetStageDone", 0x03b, true, false),
+         new FunctionInfo("GetTalkedToPCParam", 0x0ac, true, false),
+         new FunctionInfo("HasMagicEffect", 0x0d6, true, false),
+         new FunctionInfo("IsCellOwner", 0x118, true, true),
+         new FunctionInfo("IsCurrentFurnitureObj", 0x0a3, true, false),
+         new FunctionInfo("IsCurrentFurnitureRef", 0x0a2, true, false),
+         new FunctionInfo("IsOwner", 0x116, true, false),
+         new FunctionInfo("IsSpellTarget", 0x0df, true, false),
+         new FunctionInfo("SameFaction", 0x02a, true, false),
+         new FunctionInfo("SameRace", 0x02b, true, false),
+         new FunctionInfo("SameSex", 0x02c, true, false)
+    };
+    
+    /**
+     * Create a new subrecord
+     *
+     * @param       recordType          The record type
+     * @param       subrecordType       The subrecord type
+     * @param       subrecordData       The subrecord data
+     */
+    public PluginSubrecord(String recordType, String subrecordType, byte[] subrecordData) {
+        
+        //
+        // Create the subrecord
+        //
+        this.recordType = recordType;
+        this.subrecordType = subrecordType;
+        this.subrecordData = subrecordData;
+        
+        //
+        // Create the subrecord information
+        //
+        if (typeMap == null) {
+            typeMap = new HashMap<String, SubrecordInfo>(subrecordInfo.length);
+            for (SubrecordInfo info : subrecordInfo)
+                typeMap.put(info.getSubrecordType(), info);            
+        }
+        
+        //
+        // Create the function information
+        //
+        if (functionMap == null) {
+            functionMap = new HashMap<Integer, FunctionInfo>(functionInfo.length);
+            for (FunctionInfo info : functionInfo)
+                functionMap.put(new Integer(info.getCode()), info);            
+        }
+    }
+    
+    /**
+     * Set the subrecord spill mode
+     *
+     * @param       mode            TRUE to write subrecord data to spill file
+     * @exception   IOException     An I/O error occurred
+     */
+    public void setSpillMode(boolean mode) throws IOException {
+        if (mode != spillMode) {
+            if (spillMode) {
+                subrecordData = Main.pluginSpill.read(subrecordPosition, subrecordLength);
+                subrecordPosition = -1;
+                subrecordLength = 0;
+            } else if (subrecordData != null) {
+                subrecordPosition = Main.pluginSpill.write(subrecordData);
+                subrecordLength = subrecordData.length;
+                subrecordData = null;
+            } else {
+                subrecordPosition = -1;
+                subrecordLength = 0;
+            }
+            
+            spillMode = mode;
+        }
+    }
+    
+    /**
+     * Return the subrecord type
+     *
+     * @return                      The subrecord type
+     */
+    public String getSubrecordType() {
+        return subrecordType;
+    }
+    
+    /**
+     * Return the subrecord data
+     *
+     * @return                      The subrecord data
+     * @exception   IOException     An I/O error occurred
+     */
+    public byte[] getSubrecordData() throws IOException {
+        if (spillMode)
+            return Main.pluginSpill.read(subrecordPosition, subrecordLength);
+        
+        return subrecordData;
+    }
+    
+    /**
+     * Set the subrecord data.  The subrecord becomes the owner of the byte array.
+     *
+     * @param       subrecordData   The new subrecord data
+     * @exception   IOException     An I/O error occurred
+     */
+    public void setSubrecordData(byte[] subrecordData) throws IOException {
+        if (spillMode) {
+            subrecordPosition = Main.pluginSpill.write(subrecordData);
+            subrecordLength = subrecordData.length;
+        } else {
+            this.subrecordData = subrecordData;
+        }
+    }
+    
+    /**
+     * Return the references for this subrecord.  The return array consists of the subrecord
+     * data offset and the reference form ID.  The form ID will be zero if there is no
+     * reference for a particular array position.
+     *
+     * @return                      Reference array or null if there are no references
+     * @exception   IOException     An I/O error occurred
+     */
+    public int[][] getReferences() throws IOException {
+        int[][] references = null;
+        
+        if (subrecordType.equals("CTDA")) {
+            //
+            // CTDA subrecord
+            //   Byte 0:      Type
+            //   Bytes 1-3:   Unknown
+            //   Bytes 4-7:   Value (float)
+            //   Bytes 8-11:  Function code
+            //   Bytes 12-15: Parameter 1
+            //   Bytes 16-19: Parameter 2
+            //
+            byte subrecordData[] = getSubrecordData();
+            int functionCode = getInteger(subrecordData, 8);
+            FunctionInfo functionInfo = functionMap.get(new Integer(functionCode));
+            if (functionInfo != null) {
+                references = new int[2][2];
+                int index = 0;
+            
+                if (functionInfo.isFirstReference() && subrecordData.length >= 16) {
+                    references[index][0] = 12;
+                    references[index][1] = getInteger(subrecordData, 12);
+                    index++;
+                }
+                        
+                if (functionInfo.isSecondReference() && subrecordData.length >= 20) {
+                    references[index][0] = 16;
+                    references[index][1] = getInteger(subrecordData, 16);
+                }
+            }
+        } else if (subrecordType.equals("DATA") && recordType.equals("MGEF")) {
+            //
+            // DATA subrecord for MGEF record
+            //   Bytes 0-3:   Unknown
+            //   Bytes 4-7:   Base cost (float)
+            //   Bytes 8-11:  Unknown
+            //   Bytes 12-15: Magic school
+            //   Bytes 16-23: Unknown
+            //   Bytes 24-27: Light
+            //   Bytes 28-31: Enchantment factor (float)
+            //   Bytes 32-35: Effect shader
+            //   Bytes 36-39: Enchant effect
+            //   Bytes 40-43: Casting sound
+            //   Bytes 44-47: Bolt sound
+            //   Bytes 48-51: Hit sound
+            //   Bytes 52-55: Area sound
+            //   Bytes 56-59: Unknown
+            //   Bytes 60-63: Barter factor (float)
+            //
+            byte subrecordData[] = getSubrecordData();
+            int[] mgefOffsets = {24, 32, 36, 40, 44, 48, 52};
+            references = new int[mgefOffsets.length][2];
+            for (int index=0; index<mgefOffsets.length; index++) {
+                int refOffset = mgefOffsets[index];
+                if (refOffset+4 > subrecordData.length)
+                    break;
+                
+                references[index][0] = refOffset;
+                references[index][1] = getInteger(subrecordData, refOffset);
+            }
+        } else if (subrecordType.equals("PLDT") && recordType.equals("PACK")) {
+            //
+            // PLDT subrecord for PACK record
+            //   Bytes 0-3:   Type
+            //                  0 = Near reference
+            //                  1 = In cell
+            //                  2 = Near current location
+            //                  3 = Near editor location
+            //                  4 = Object ID
+            //                  5 = Object type
+            //   Bytes 4-7:   Location
+            //   Bytes 8-11:  Radius
+            //
+            byte subrecordData[] = getSubrecordData();
+            int type = getInteger(subrecordData, 0);
+            if (type == 0 || type == 1 || type == 4) {
+                references = new int[1][2];
+                references[0][0] = 4;
+                references[0][1] = getInteger(subrecordData, 4);
+            }
+        } else if (subrecordType.equals("PTDT") && recordType.equals("PACK")) {
+            //
+            // PTDT subrecord for PACK record
+            //   Bytes 0-3:   Type
+            //                  0 = Specific reference
+            //                  1 = Object ID
+            //                  2 = Object type
+            //   Bytes 4-7:   Target
+            //   Bytes 8-11:  Count
+            //
+            byte subrecordData[] = getSubrecordData();
+            int type = getInteger(subrecordData, 0);
+            if (type == 0 || type == 1) {
+                references = new int[1][2];
+                references[0][0] = 4;
+                references[0][1] = getInteger(subrecordData, 4);
+            }
+        } else {
+            //
+            // Locate the subrecord information based on the record and subrecord type
+            //
+            boolean returnReferences = false;
+            SubrecordInfo subrecordInfo = typeMap.get(subrecordType);
+            if (subrecordInfo != null) {
+                String[] recordTypes = subrecordInfo.getRecordTypes();
+                if (recordTypes.length == 0) {
+                    returnReferences = true;
+                } else {
+                    for (int i=0; i<recordTypes.length; i++) {
+                        if (recordType.equals(recordTypes[i])) {
+                            returnReferences = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            //
+            // Return the subrecord references
+            //
+            if (returnReferences) {
+                byte subrecordData[] = getSubrecordData();
+                int[] refOffsets = subrecordInfo.getReferenceOffsets();
+                int refOffset = 0;
+                int refSize = 4;
+                int i = -1;
+                int index = 0;
+                boolean repeating;
+                
+                if (refOffsets[0] < 0) {
+                    repeating = true;
+                    refSize = -refOffsets[0];
+                    refOffset = -refSize;
+                    references = new int[subrecordData.length/refSize][2];
+                } else {
+                    repeating = false;
+                    references = new int[refOffsets.length][2];
+                }
+
+                while (true) {
+                    if (repeating) {
+                        refOffset += refSize;
+                    } else {
+                        i++;
+                        if (i == refOffsets.length)
+                            break;
+                            
+                        refOffset = refOffsets[i];
+                    }
+                        
+                    if (refOffset+refSize > subrecordData.length)
+                        break;
+                    
+                    references[index][0] = refOffset;
+                    references[index][1] = getInteger(subrecordData, refOffset);
+                    index++;
+                }
+            }
+        }
+        
+        return references;
+    }
+
+    /**
+     * Returns a FunctionInfo based on the code
+     *
+     * @param       funcCode            The function code
+     * @return      FunctionInfo       null if invalid code
+     */
+    public static FunctionInfo getFunctionInfo(int funcCode)
+    {
+        //
+        // Create the function information if not already present.
+        //
+        if (functionMap == null)
+        {
+            functionMap = new HashMap<Integer, FunctionInfo>(functionInfo.length);
+            for (FunctionInfo info : functionInfo)
+                functionMap.put(new Integer(info.getCode()), info);            
+        }
+        return functionMap.get(new Integer(funcCode));
+
+    }
+
+    public String getDisplayDataTypeLabel()
+    {
+    	int dataType = SubrecordDataType.getDataType(subrecordType);
+    	String retStr = SubrecordDataType.getDataTypeLabel(dataType);
+    	if (dataType == SubrecordDataType.Other)
+    	{
+    		retStr = subrecordType + " " + retStr;
+    	}
+    	return retStr;
+    }
+
+    public String getDisplayData()
+    {
+    	byte[] subrecordData = null;
+    	int dataType = SubrecordDataType.getDataType(subrecordType);
+    	String retStr = "";
+        //
+        // Get the subrecord data
+        //
+        try {
+            subrecordData = getSubrecordData();
+        } catch (IOException exc) {
+            Main.logException("Exception while getting subrecord data", exc);
+            subrecordData = new byte[0];
+            dataType = SubrecordDataType.ByteArray;
+        }
+        switch (dataType)
+        {
+        case SubrecordDataType.FormID:
+        	retStr = getDisplayDataFormID(subrecordData);
+        	break;
+        case SubrecordDataType.Float:
+        	retStr = getDisplayDataFloat(subrecordData);
+        	break;
+        case SubrecordDataType.Integer:
+        	retStr = getDisplayDataInteger(subrecordData);
+        	break;
+        case SubrecordDataType.String:
+        	retStr = getDisplayDataString(subrecordData);
+        	break;
+        case SubrecordDataType.StringNoNull:
+        	retStr = getDisplayDataStringNoNull(subrecordData);
+        	break;
+        case SubrecordDataType.XYCoordinates:
+        	retStr = getDisplayDataXYCoordinates(subrecordData);
+        	break;
+        case SubrecordDataType.ByteArray:
+        default:
+        	retStr = getDisplayDataByteArray(subrecordData);
+        }
+        return retStr;
+    }
+    
+    private String getDisplayDataString(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to string.
+        //
+    	return new String(subrecordData, 0, subrecordData.length-1);
+    }
+    
+    private String getDisplayDataStringNoNull(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to string without null.
+    	// Currently only found for script text.
+        //
+    	return new String(subrecordData, 0, subrecordData.length);
+    }
+    
+    private String getDisplayDataFormID(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to formID in hex form.
+        //
+    	int formID = SerializedElement.getInteger(subrecordData, 0);
+    	return String.format("%08X", formID);
+    }
+    
+    private String getDisplayDataFloat(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to float.
+        //
+    	int floatBits = SerializedElement.getInteger(subrecordData, 0);
+    	return String.format("%.3f", Float.intBitsToFloat(floatBits));
+    }
+    
+    private String getDisplayDataInteger(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to float.
+        //
+    	int intBits = SerializedElement.getInteger(subrecordData, 0);
+    	return String.format("%d", intBits);
+    }
+    
+    private String getDisplayDataXYCoordinates(byte[] subrecordData)
+    {        
+        //
+        // Convert the subrecord data to X-Y coordinates.
+        //
+		int x = SerializedElement.getInteger(subrecordData, 0);
+		int y = SerializedElement.getInteger(subrecordData, 4);
+		String retStr = x + ", " + y;
+    	return retStr;
+    }
+
+    private String getDisplayDataByteArray(byte[] subrecordData)
+    {
+        
+        //
+        // Convert the subrecord data to hexadecimal
+        //
+        StringBuilder dumpData = new StringBuilder(128+3*subrecordData.length+6*(subrecordData.length/16));
+        dumpData.append(String.format("%s subrecord: Data length x'%X'\n", 
+                                      getSubrecordType(), subrecordData.length));
+        dumpData.append("\n       0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
+        StringBuilder dumpHex = new StringBuilder(48);
+        StringBuilder dumpLine = new StringBuilder(16);
+        
+        for (int i=0; i<subrecordData.length; i+=16) {
+            for (int j=0; j<16; j++) {
+                int offset = i+j;
+                if (offset == subrecordData.length)
+                    break;
+                
+                dumpHex.append(String.format(" %02X",  subrecordData[offset]));
+                if (subrecordData[offset] >= 0x20 && subrecordData[offset] < 0x7f)
+                    dumpLine.append(new String(subrecordData, offset, 1));
+                else
+                    dumpLine.append(".");
+            }
+            
+            while (dumpHex.length() < 48)
+                dumpHex.append("   ");
+            
+            while (dumpLine.length() < 16)
+                dumpLine.append(" ");
+            
+            dumpData.append(String.format("%04X:", i));
+            dumpData.append(dumpHex);
+            dumpData.append("  *");
+            dumpData.append(dumpLine);
+            dumpData.append("*");
+            if (i+16 < subrecordData.length)
+                dumpData.append("\n");
+            
+            dumpHex.delete(0, 48);
+            dumpLine.delete(0,16);
+        }
+        return dumpData.toString();
+    }
+
+    /**
+     * Determine if this subrecord is equal to another subrecord.  Two subrecords are considered to be
+     * equal if they have the same subrecord type and subrecord data.
+     */
+    public boolean equals(Object object) {
+        boolean areEqual = false;
+        if (object instanceof PluginSubrecord) {
+            PluginSubrecord objSubrecord = (PluginSubrecord)object;
+            if (objSubrecord.getSubrecordType().equals(subrecordType)) {
+                try {
+                    byte[] subrecordData = getSubrecordData();
+                    byte[] objSubrecordData = objSubrecord.getSubrecordData();
+                    if (objSubrecordData.length == subrecordData.length) {
+                        if ((subrecordType.equals("ATXT") || subrecordType.equals("BTXT")) && subrecordData.length == 8 ) {
+                            
+                            //
+                            // The ATXT and BTXT subrecords contain garbage at offset 5
+                            //
+                            if (subrecordData[0] == objSubrecordData[0] &&
+                                            subrecordData[1] == objSubrecordData[1] &&
+                                            subrecordData[2] == objSubrecordData[2] &&
+                                            subrecordData[3] == objSubrecordData[3] &&
+                                            subrecordData[4] == objSubrecordData[4] &&
+                                            subrecordData[6] == objSubrecordData[6] &&
+                                            subrecordData[7] == objSubrecordData[7])
+                                areEqual = true;
+                            
+                        } else if (subrecordType.equals("EFIT") && subrecordData.length == 24) {
+                            
+                            //
+                            // The EFIT subrecord contains garbage for the effect subtype if it
+                            // is not an attribute or skill effect
+                            //
+                            String effectName = new String(subrecordData, 0, 4);
+                            int count = 20;
+                            if (effectName.equals("DGAT") || effectName.equals("DRAT") || effectName.equals("DRSK") ||
+                                                             effectName.equals("FOAT") || effectName.equals("FOSK") ||
+                                                             effectName.equals("REAT") || effectName.equals("ABAT") ||
+                                                             effectName.equals("ABSK"))
+                                count = 24;
+                            
+                            areEqual = true;
+                            for (int i=0; i<count; i++) {
+                                if (subrecordData[i] != objSubrecordData[i]) {
+                                    areEqual = false;
+                                    break;
+                                }
+                            }                            
+                            
+                        } else if (subrecordType.equals("LVLO") && subrecordData.length == 12) {
+                            
+                            //
+                            // The LVLO subrecord contains garbage at offsets 2-3 and 10-11
+                            //
+                            if (subrecordData[0] == objSubrecordData[0] &&
+                                            subrecordData[1] == objSubrecordData[1] &&
+                                            subrecordData[4] == objSubrecordData[4] &&
+                                            subrecordData[5] == objSubrecordData[5] &&
+                                            subrecordData[6] == objSubrecordData[6] &&
+                                            subrecordData[7] == objSubrecordData[7] &&
+                                            subrecordData[8] == objSubrecordData[8] &&
+                                            subrecordData[9] == objSubrecordData[9])
+                                areEqual = true;
+                            
+                        } else if (subrecordType.equals("PGRP") && subrecordData.length%16 == 0) {
+                            
+                            //
+                            // The PGRP subrecord contains garbage at offsets 14-15 of each 16-byte entry
+                            //
+                            areEqual = true;
+                            for (int i=0; i<subrecordData.length; i+=16) {
+                                for (int j=0; j<13; j++) {
+                                    if (subrecordData[i+j] != objSubrecordData[i+j]) {
+                                        areEqual = false;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!areEqual)
+                                    break;
+                            }
+                            
+                        } else if (subrecordType.equals("PKDT") && subrecordData.length == 8) {
+                            
+                            //
+                            // The PKDT subrecord contains garbage at offset 5-7
+                            //
+                            if (subrecordData[0] == objSubrecordData[0] &&
+                                            subrecordData[1] == objSubrecordData[1] &&
+                                            subrecordData[2] == objSubrecordData[2] &&
+                                            subrecordData[3] == objSubrecordData[3] &&
+                                            subrecordData[4] == objSubrecordData[4])
+                                areEqual = true;
+                            
+                        } else if (subrecordType.equals("QSTA") && subrecordData.length == 8) {
+                            
+                            //
+                            // The QSTA subrecord contains garbage at offsets 6-7
+                            //
+                            if (subrecordData[0] == objSubrecordData[0] &&
+                                            subrecordData[1] == objSubrecordData[1] &&
+                                            subrecordData[2] == objSubrecordData[2] &&
+                                            subrecordData[3] == objSubrecordData[3] &&
+                                            subrecordData[4] == objSubrecordData[4] &&
+                                            subrecordData[5] == objSubrecordData[5])
+                                areEqual = true;
+                            
+                        } else if (subrecordType.equals("XCLR") && subrecordData.length%4 == 0) {
+                            
+                            //
+                            // The XCLR subrecord consists of an array of region identifiers
+                            //
+                            for (int i=0; i<subrecordData.length; i+=4) {
+                                areEqual = false;
+                                int formID = getInteger(subrecordData, i);
+                                for (int j=0; j<subrecordData.length; j+=4) {
+                                    int objFormID = getInteger(objSubrecordData, j);
+                                    if (objFormID == formID) {
+                                        areEqual = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!areEqual)
+                                    break;
+                            }
+                            
+                        } else if (subrecordType.equals("XLOC") && subrecordData.length == 12) {
+                            
+                            //
+                            // The XLOC subrecord contains garbage at offsets 9-11
+                            //
+                            if (subrecordData[0] == objSubrecordData[0] &&
+                                            subrecordData[1] == objSubrecordData[1] &&
+                                            subrecordData[2] == objSubrecordData[2] &&
+                                            subrecordData[3] == objSubrecordData[3] &&
+                                            subrecordData[4] == objSubrecordData[4] &&
+                                            subrecordData[5] == objSubrecordData[5] &&
+                                            subrecordData[6] == objSubrecordData[6] &&
+                                            subrecordData[7] == objSubrecordData[7] &&
+                                            subrecordData[8] == objSubrecordData[8])
+                                areEqual = true;
+
+                        } else {
+                            
+                            //
+                            // The subrecord data must be identical
+                            //
+                            areEqual = true;
+                            for (int i=0; i<subrecordData.length; i++) {
+                                if (subrecordData[i] != objSubrecordData[i]) {
+                                    areEqual = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } catch (IOException exc) {
+                    areEqual = false;
+                }
+            }
+        }
+        
+        return areEqual;
+    }
+        
+    /**
+     * Return a string describing the subrecord
+     *
+     * @return                          Descriptive string
+     */
+    public String toString() {
+        return subrecordType+" subrecord";
+    }
+}

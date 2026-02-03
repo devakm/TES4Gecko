@@ -1,0 +1,33 @@
+package TES4Gecko;
+
+/**
+ * @author SACarrow
+ * This code represents the various entities that are represented in
+ * subrecord fields. If "other" is specified, a byte array is assumed
+ */
+
+public final class SubrecordDataTypeCode
+{
+	private SubrecordDataTypeCode() {}; // Not meant to be instantiated
+	
+	public static final int Invalid = -1;
+	public static final int ByteArray = 0;
+	public static final int String = 1;
+	public static final int FormID = 2;
+	public static final int Integer = 3;
+	public static final int Float = 4;
+	public static final int Byte = 5;
+	public static final int Other = 6;
+	
+//	public static boolean isValid(int param)
+//	{
+//		return (param == Neutral || 
+//				param == Anger ||
+//				param == Disgust ||
+//				param == Fear ||
+//				param == Sad ||
+//				param == Happy ||
+//				param == Surprise);
+//	}
+	
+}

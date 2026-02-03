@@ -1,0 +1,29 @@
+/**
+ * 
+ */
+package TES4Gecko;
+
+/**
+ * @author SACarrow
+ * The ComparisonCode is just a wrapper for Oblivion CS comparison opcodes.
+ */
+
+public final class ComparisonCode
+{
+	public static final int EqualTo = 0;
+	public static final int NotEqualTo = 2;
+	public static final int GreaterThan = 4;
+	public static final int GreaterThanOrEqualTo = 6;
+	public static final int LessThan = 8;
+	public static final int LessThanOrEqualTo = 10;
+	
+	public static boolean isValid(int param)
+	{
+		return (param == EqualTo || 
+				param == NotEqualTo ||
+				param == GreaterThan ||
+				param == GreaterThanOrEqualTo ||
+				param == LessThan ||
+				param == LessThanOrEqualTo);
+	}
+}

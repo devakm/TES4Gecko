@@ -1,0 +1,3 @@
+#Fri Aug 01 12:39:28 EDT 2008
+prefWatchExpressions=<?xml version\="1.0" encoding\="UTF-8"?>\r\n<watchExpressions>\r\n<expression enabled\="true" text\="questInfos"/>\r\n<expression enabled\="true" text\="e"/>\r\n<expression enabled\="true" text\="headerLine"/>\r\n<expression enabled\="true" text\="WSFormInfo"/>\r\n</watchExpressions>\r\n
+eclipse.preferences.version=1

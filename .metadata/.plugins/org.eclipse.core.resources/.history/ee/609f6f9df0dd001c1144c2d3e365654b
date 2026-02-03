@@ -1,0 +1,683 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Properties;
+import java.util.zip.DataFormatException;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+
+/**
+ * A plugin group consists of one or more plugin records and/or subgroups.
+ */
+public class PluginGroup extends PluginRecord {
+    
+    /** Top-level group */
+    public static final int TOP = 0;
+    
+    /** Worldspace group */
+    public static final int WORLDSPACE = 1;
+    
+    /** Interior cell block */
+    public static final int INTERIOR_BLOCK = 2;
+    
+    /** Interior cell subblock */
+    public static final int INTERIOR_SUBBLOCK = 3;
+    
+    /** Exterior cell block */
+    public static final int EXTERIOR_BLOCK = 4;
+    
+    /** Exterior cell subblock */
+    public static final int EXTERIOR_SUBBLOCK = 5;
+    
+    /** Cell children */
+    public static final int CELL = 6;
+    
+    /** Topic children */
+    public static final int TOPIC = 7;
+    
+    /** Cell persistent children */
+    public static final int CELL_PERSISTENT = 8;
+    
+    /** Cell temporary children */
+    public static final int CELL_TEMPORARY = 9;
+    
+    /** Cell distant children */
+    public static final int CELL_DISTANT = 10;
+    
+    /** Group label */
+    private byte[] groupLabel;
+    
+    /** Group record type for a TOP group */
+    private String groupRecordType;
+    
+    /** Group parent form ID */
+    private int groupParentID;
+    
+    /** Group type */
+    private int groupType;
+    
+    /** Group records */
+    private List<PluginRecord> recordList;
+    
+    /** Group description mappings */
+    private static Map<String, String> typeMap;
+    
+    /** Group descriptions */
+    private static String[][] groupDescriptions = {
+        {"ACTI", "Activators"},
+        {"ALCH", "Potions"},
+        {"AMMO", "Ammunition"},
+        {"ANIO", "Animated Object"},
+        {"APPA", "Apparatus"},
+        {"ARMO", "Armor"},
+        {"BOOK", "Books"},
+        {"BSGN", "Birthsigns"},
+        {"CELL", "Cells"},
+        {"CLAS", "Classes"},
+        {"CLOT", "Clothing"},
+        {"CLMT", "Climate"},
+        {"CONT", "Containers"},
+        {"CREA", "Creatures"},
+        {"CSTY", "Combat Styles"},
+        {"DIAL", "Dialog"},
+        {"DOOR", "Doors"},
+        {"EFSH", "Effect Shaders"},
+        {"ENCH", "Enchantments"},
+        {"EYES", "Eyes"},
+        {"FACT", "Factions"},
+        {"FLOR", "Flora"},
+        {"FURN", "Furniture"},
+        {"GLOB", "Global Variables"},
+        {"GMST", "Game Settings"},
+        {"GRAS", "Grass"},
+        {"HAIR", "Hair"},
+        {"IDLE", "Idle Animations"},
+        {"INGR", "Ingredients"},
+        {"KEYM", "Keys"},
+        {"LIGH", "Lights"},
+        {"LSCR", "Load Screens"},
+        {"LTEX", "Land Textures"},
+        {"LVLC", "Leveled Creatures"},
+        {"LVLI", "Leveled Items"},
+        {"LVSP", "Leveled Spells"},
+        {"MGEF", "Magic Effects"},
+        {"MISC", "Miscellaneous Items"},
+        {"NPC_", "NPCs"},
+        {"PACK", "Packages"},
+        {"QUST", "Quests"},
+        {"RACE", "Races"},
+        {"REGN", "Regions"},
+        {"SBSP", "Subspaces"},
+        {"SCPT", "Scripts"},
+        {"SGST", "Sigil Stones"},
+        {"SKIL", "Skills"},
+        {"SLGM", "Soul Gems"},
+        {"SOUN", "Sounds"},
+        {"SPEL", "Spells"},
+        {"STAT", "Statics"},
+        {"TREE", "Trees"},
+        {"WATR", "Water"},
+        {"WEAP", "Weapons"},
+        {"WTHR", "Weather"},
+        {"WRLD", "World Spaces"}
+    };
+    
+    /**
+     * Create a new plugin group
+     *
+     * @param       prefix          The 20-byte group prefix
+     */
+    public PluginGroup(byte[] prefix) {
+        super("GRUP");
+        
+        //
+        // Group prefix:
+        //   Bytes 00-03: 'GRUP'
+        //   Bytes 04-07: Record length (includes the 20-byte prefix)
+        //   Bytes 08-11: Group label
+        //   Bytes 12-15: Group type
+        //   Bytes 16-19: <unknown>        
+        //
+        groupLabel = new byte[4];
+        System.arraycopy(prefix, 8, groupLabel, 0, 4);
+        groupType = (int)prefix[12]&255;
+        
+        switch (groupType) {
+            case PluginGroup.TOP:
+                if (groupLabel[0] >= 0x20)
+                    groupRecordType = new String(groupLabel);
+                else
+                    groupRecordType = new String();
+                break;
+                
+            case PluginGroup.WORLDSPACE:
+            case PluginGroup.CELL:
+            case PluginGroup.CELL_PERSISTENT:
+            case PluginGroup.CELL_TEMPORARY:
+            case PluginGroup.CELL_DISTANT:
+            case PluginGroup.TOPIC:
+                groupParentID = getInteger(groupLabel, 0);
+        }
+        
+        recordList = new ArrayList<PluginRecord>();
+        if (typeMap == null)
+            buildTypeMap();
+    }
+    
+    /**
+     * Create a new TOP group
+     *
+     * @param       recordType      The group record type
+     */
+    public PluginGroup(String recordType) {
+        super("GRUP");
+        groupType = PluginGroup.TOP;
+        groupLabel = recordType.getBytes();
+        groupRecordType = recordType;
+        
+        recordList = new ArrayList<PluginRecord>();
+        if (typeMap == null)
+            buildTypeMap();
+    }
+
+    /**
+     * Create a new plugin group
+     *
+     * @param       groupType       The group type
+     * @param       groupLabel      The 4-byte group label
+     */
+    public PluginGroup(int groupType, byte[] groupLabel) {
+        super("GRUP");
+        this.groupType = groupType;
+        this.groupLabel = groupLabel;
+        
+        switch (groupType) {
+            case PluginGroup.TOP:
+                if (groupLabel[0] >= 0x20)
+                    groupRecordType = new String(groupLabel);
+                else
+                    groupRecordType = new String();
+                break;
+                
+            case PluginGroup.WORLDSPACE:
+            case PluginGroup.CELL:
+            case PluginGroup.CELL_PERSISTENT:
+            case PluginGroup.CELL_TEMPORARY:
+            case PluginGroup.CELL_DISTANT:
+            case PluginGroup.TOPIC:
+                groupParentID = getInteger(groupLabel, 0);
+        }
+        
+        recordList = new ArrayList<PluginRecord>();
+        if (typeMap == null)
+            buildTypeMap();
+    }
+    
+    /**
+     * Create a new plugin group
+     *
+     * @param       groupType       The group type
+     * @param       groupParentID   The group parent ID
+     */
+    public PluginGroup(int groupType, int groupParentID) {
+        super("GRUP");
+        this.groupType = groupType;
+        groupLabel = new byte[4];
+        setInteger(groupParentID, groupLabel, 0);
+        
+        switch (groupType) {
+            case PluginGroup.WORLDSPACE:
+            case PluginGroup.CELL:
+            case PluginGroup.CELL_PERSISTENT:
+            case PluginGroup.CELL_TEMPORARY:
+            case PluginGroup.CELL_DISTANT:
+            case PluginGroup.TOPIC:
+                this.groupParentID = groupParentID;
+        }
+        
+        recordList = new ArrayList<PluginRecord>();
+        if (typeMap == null)
+            buildTypeMap();
+    }
+    
+    /**
+     * Build the group description mappings
+     */
+    private void buildTypeMap() {
+        typeMap = new HashMap<String, String>(groupDescriptions.length);
+        for (int i=0; i<groupDescriptions.length; i++)
+            typeMap.put(groupDescriptions[i][0], groupDescriptions[i][1]);
+    }
+    
+    /**
+     * Return the group record count.  The record count includes all records
+     * in the group as well as in any subgroups.
+     *
+     * @return                      The number of records in the group
+     */
+    public int getRecordCount() {
+        int recordCount = 0;
+        for (PluginRecord record : recordList) {
+            recordCount++;
+            if (record instanceof PluginGroup)
+                recordCount += ((PluginGroup)record).getRecordCount();
+        }
+        
+        return recordCount;
+    }
+    
+    /**
+     * Determine if the group is empty
+     *
+     * @return                      TRUE if the group is empty
+     */
+    public boolean isEmpty() {
+        return (recordList.size()==0 ? true : false);
+    }
+    
+    /**
+     * Return the group type
+     *
+     * @return                      The group type
+     */
+    public int getGroupType() {
+        return groupType;
+    }
+    
+    /**
+     * Return the group label
+     *
+     * @return                      The group label
+     */
+    public byte[] getGroupLabel() {
+        return groupLabel;
+    }
+    
+    /**
+     * Set the group label.  The group becomes the owner of the byte array.
+     *
+     * @param       label           The group label
+     */
+    public void setGroupLabel(byte[] label) {
+        groupLabel = label;
+        
+        switch (groupType) {
+            case PluginGroup.TOP:
+                if (groupLabel[0] >= 0x20)
+                    groupRecordType = new String(groupLabel);
+                else
+                    groupRecordType = new String();
+                break;
+                
+            case PluginGroup.WORLDSPACE:
+            case PluginGroup.CELL:
+            case PluginGroup.CELL_PERSISTENT:
+            case PluginGroup.CELL_TEMPORARY:
+            case PluginGroup.CELL_DISTANT:
+            case PluginGroup.TOPIC:
+                groupParentID = getInteger(groupLabel, 0);
+        }
+    }
+    
+    /**
+     * Return the group record type
+     *
+     * @return                      The group record type or null if this is not a TOP group
+     */
+    public String getGroupRecordType() {
+        return groupRecordType;
+    }
+    
+    /**
+     * Return the group parent ID
+     *
+     * @return                      The group parent ID or zero if there is no parent
+     */
+    public int getGroupParentID() {
+        return groupParentID;
+    }
+    
+    /**
+     * Set the group parent ID
+     *
+     * @param       parentID        The group parent ID
+     */
+    public void setGroupParentID(int parentID) {
+        groupParentID = parentID;
+        setInteger(parentID, groupLabel, 0);
+    }
+    
+    /**
+     * Return the record list
+     *
+     * @return                      The record list
+     */
+    public List<PluginRecord> getRecordList() {
+        return recordList;
+    }
+    
+    /**
+     * Add the group records to the plugin form list
+     *
+     * @param       formList        The plugin form list
+     */
+    public void updateFormList(List<FormInfo> formList) {
+        for (PluginRecord record : recordList) {
+            record.setParent(this);
+            if (record instanceof PluginGroup) {
+                PluginGroup subGroup = (PluginGroup)record;
+                subGroup.updateFormList(formList);
+            } else if (!record.isIgnored()) {
+                FormInfo formInfo = new FormInfo(record, record.getRecordType(), record.getFormID(), record.getEditorID());
+                formInfo.setParentFormID(groupParentID);
+                formList.add(formInfo);
+            }
+        }
+    }
+    
+    /**
+     * Remove ignored records from the group.  The group itself will be removed if it is
+     * empty unless it is a WORLDSPACE, CELL or TOPIC group.  We need to keep those groups unless
+     * the preceding WRLD, CELL or DIAL record has been removed.
+     */
+    public void removeIgnoredRecords() {
+        ListIterator<PluginRecord> lit = recordList.listIterator();
+        PluginRecord prevRecord = null;
+        while (lit.hasNext()) {
+            PluginRecord record = lit.next();
+            if (record instanceof PluginGroup) {
+                PluginGroup group = (PluginGroup)record;
+                group.removeIgnoredRecords();
+                if (group.isEmpty()) {
+                    int groupType = group.getGroupType();
+                    if (groupType == WORLDSPACE || groupType == CELL || groupType == TOPIC) {
+                        if (prevRecord == null || prevRecord.getRecordType().equals("GRUP"))
+                            lit.remove();
+                        else
+                            prevRecord = record;
+                    } else {
+                        lit.remove();
+                    }
+                } else {
+                    prevRecord = record;
+                }
+            } else if (record.isIgnored()) {
+                lit.remove();
+            } else {
+                prevRecord = record;
+            }
+        }
+    }
+    
+    /**
+     * Get the hash code for this group.  The group type and group label are used
+     * to form the hash code.
+     *
+     * @return                      The hash code
+     */
+    public int hashCode() {
+        return getInteger(groupLabel, 0) + groupType;
+    }
+
+    /**
+     * Determine if this group is equal to another group.  Two groups are considered to be
+     * equal if they have the same group type, group label and record list.  The record data
+     * does not need to be the same.
+     */
+    public boolean equals(Object object) {
+        boolean areEqual = false;
+        if (object instanceof PluginGroup) {
+            PluginGroup objGroup = (PluginGroup)object;
+            if (objGroup.getGroupType() == groupType) {
+                byte[] objGroupLabel = objGroup.getGroupLabel();
+                if (compareArrays(groupLabel, 0, objGroupLabel, 0, 4) == 0) {
+                    List<PluginRecord> objRecordList = objGroup.getRecordList();
+                    if (objRecordList.size() == recordList.size()) {
+                        areEqual = true;
+                        for (int i=0; i<recordList.size(); i++) {
+                            if (!objRecordList.get(i).equals(recordList.get(i))) {
+                                areEqual = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return areEqual;
+    }
+    
+    /**
+     * Determine if this group is identical to another group.  Two groups are considered
+     * to be identical if they have the same group type, group label, record list and 
+     * record data.
+     *
+     * @param       group                   The group to be compared
+     */
+    public boolean isIdentical(PluginGroup group) {
+        boolean areIdentical = false;
+        if (group.getGroupType() == groupType) {
+            byte[] cmpGroupLabel = group.getGroupLabel();
+            if (compareArrays(groupLabel, 0, cmpGroupLabel, 0, 4) == 0) {
+                List<PluginRecord> cmpRecordList = group.getRecordList();
+                if (cmpRecordList.size() == recordList.size()) {
+                    areIdentical = true;
+                    for (int i=0; i<recordList.size(); i++) {
+                        if (!cmpRecordList.get(i).isIdentical(recordList.get(i))) {
+                            areIdentical = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return areIdentical;
+    }
+    
+    /**
+     * Return a string describing the group
+     *
+     * @return                      A descriptive string
+     */
+    public String toString() {
+        String text;
+        int x, y;
+        int intValue = getInteger(groupLabel, 0);
+        switch (groupType) {
+            case TOP:
+                String type = new String(groupLabel);
+                String description = typeMap.get(type);
+                if (description != null)
+                    text = String.format("Group: %s", description);
+                else
+                    text = String.format("Group: Type %s", new String(groupLabel));
+                break;
+                
+            case WORLDSPACE:
+                text = String.format("Group: Worldspace (%08X) children", intValue);
+                break;
+                
+            case INTERIOR_BLOCK:
+                text = String.format("Group: Interior cell block %d", intValue); 
+                break;
+                
+            case INTERIOR_SUBBLOCK:
+                text = String.format("Group: Interior cell subblock %d", intValue);
+                break;
+                
+            case EXTERIOR_BLOCK:
+                x = intValue>>>16;
+                if ((x&0x8000) != 0)
+                    x |= 0xffff0000;
+                
+                y = intValue&0xffff;
+                if ((y&0x8000) != 0)
+                    y |= 0xffff0000;
+                
+                text = String.format("Group: Exterior cell block %d,%d",  x, y);
+                break;
+                
+            case EXTERIOR_SUBBLOCK:
+                x = intValue>>>16;
+                if ((x&0x8000) != 0)
+                    x |= 0xffff0000;
+                
+                y = intValue&0xffff;
+                if ((y&0x8000) != 0)
+                    y |= 0xffff0000;
+                                
+                text = String.format("Group: Exterior cell subblock %d,%d", x, y);
+                break;
+                
+            case CELL:
+                text = String.format("Group: Cell (%08X) children", intValue);
+                break;
+                
+            case TOPIC:
+                text = String.format("Group: Topic (%08X) children", intValue);
+                break;
+                
+            case CELL_PERSISTENT:
+                text = String.format("Group: Cell (%08X) persistent children", intValue);
+                break;
+                
+            case CELL_TEMPORARY:
+                text = String.format("Group: Cell (%08X) temporary children", intValue);
+                break;
+                
+            case CELL_DISTANT:
+                text = String.format("Group: Cell (%08X) visible distant children", intValue);
+                break;
+                
+            default:
+                text = String.format("Group: Type %d, Parent %08X", groupType, intValue);
+        }
+        
+        return text;
+    }
+    
+    /**
+     * Load the plugin group
+     *
+     * @param       file                    The plugin file
+     * @param       in                      The plugin file input stream
+     * @param       groupLength             The group data length
+     * @exception   DataFormatException     Error while decompressing data
+     * @exception   IOException             Error while reading the plugin file
+     * @exception   PluginException         The group is not valid
+     */
+    public void load(File file, RandomAccessFile in, int groupLength) 
+                                    throws PluginException, IOException, DataFormatException {
+        int dataLength = groupLength;
+        int count, length;
+        String type;
+        PluginRecord record;
+        byte[] prefix = new byte[20];
+        
+        //
+        // Read the records in the group
+        //
+        // Bytes 00-03: Record type
+        // Bytes 04-07: Record length (The length includes the 20-byte prefix for 'GRUP' records
+        //                             but not for other record types)
+        // Bytes 08-11: Flags1
+        // Bytes 12-15: Form ID
+        // Bytes 16-19: Flags2
+        //        
+        while (dataLength >= 20) {
+            count = in.read(prefix);
+            if (count != 20)
+                throw new PluginException(file.getName()+": Record prefix is incomplete");
+            
+            dataLength -= 20;
+            type = new String(prefix, 0, 4);
+            length = getInteger(prefix, 4);
+            if (type.equals("GRUP")) {
+                length -= 20;
+                record = new PluginGroup(prefix);
+            } else {
+                record = new PluginRecord(prefix);
+            }
+            
+            record.load(file, in, length);
+            recordList.add(record);
+            dataLength -= length;
+        }
+
+        //
+        // Error if we did not process all of the group data
+        //
+        if (dataLength != 0) {
+            if (groupType == 0)
+                throw new PluginException(file.getName()+": Group "+groupRecordType+" is incomplete");
+                
+            throw new PluginException(file.getName()+": Subgroup type "+groupType+" is incomplete");        
+        }
+    }
+    
+    /**
+     * Write the group to the plugin file
+     *
+     * @param       out             The random access output file
+     * @exception   IOException     An I/O error occurred
+     */
+    public void store(RandomAccessFile out) throws IOException {
+        
+        //
+        // Leave room for the group record prefix (20 bytes)
+        //
+        byte[] prefix = new byte[20];
+        long groupPosition = out.getFilePointer();
+        out.write(prefix);
+        
+        //
+        // Write the group records
+        //
+        for (PluginRecord record : recordList)
+            record.store(out);
+
+        //
+        // Write the group header
+        //
+        // Bytes 00-03: Record type ('GRUP')
+        // Bytes 04-07: Record length (including the 20-byte prefix)
+        // Bytes 08-11: Group label
+        // Bytes 12-15: Group type
+        // Bytes 16-19: Not used    
+        //
+        long stopPosition = out.getFilePointer();
+        System.arraycopy("GRUP".getBytes(), 0, prefix, 0, 4);
+        setInteger((int)(stopPosition-groupPosition), prefix, 4);
+        System.arraycopy(groupLabel, 0, prefix, 8, 4);
+        setInteger(groupType, prefix, 12);
+        out.seek(groupPosition);
+        out.write(prefix);
+        out.seek(stopPosition);
+    }    
+
+    /**
+     * Clone the group and its record list
+     *
+     * @return                      Cloned record
+     */
+    public Object clone() {
+        Object clonedObject = super.clone();
+        PluginGroup clonedGroup = (PluginGroup)clonedObject;
+        clonedGroup.recordList = new ArrayList<PluginRecord>(recordList.size());
+        for (PluginRecord record : recordList)
+            clonedGroup.recordList.add((PluginRecord)record.clone());
+
+        return clonedObject;
+    }
+}

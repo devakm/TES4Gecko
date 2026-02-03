@@ -1,0 +1,306 @@
+package TES4Gecko;
+
+import java.util.HashMap;
+
+/**
+ * The FunctionCode is just a wrapper for Oblivion CS function opcodes.  
+ */
+public final class FunctionCode
+{
+    public static final int GetCrime = 0x07a;
+    public static final int GetDeadCount = 0x054;
+    public static final int GetDetected = 0x02d;
+    public static final int GetDetectionLevel = 0x0b4;
+    public static final int GetDisposition = 0x04c;
+    public static final int GetDistance = 0x01;
+    public static final int GetEquipped = 0x0b6;
+    public static final int GetFactionRank = 0x049;
+    public static final int GetFactionRankDifference = 0x03c;
+    public static final int GetFriendHit = 0x120;
+    public static final int GetGlobalValue = 0x04a;
+    public static final int GetHeadingAngle = 0x063;
+    public static final int GetInCell = 0x043;
+    public static final int GetInCellParam = 0x0e6;
+    public static final int GetInFaction = 0x047;
+    public static final int GetInSameCell = 0x020;
+    public static final int GetInWorldspace = 0x136;
+    public static final int GetIsClass = 0x044;
+    public static final int GetIsClassDefault = 0x0e4;
+    public static final int GetIsCurrentPackage = 0x0a1;
+    public static final int GetIsCurrentWeather = 0x095;
+    public static final int GetIsID = 0x048;
+    public static final int GetIsPlayerBirthsign = 0x0e0;
+    public static final int GetIsRace = 0x045;
+    public static final int GetIsSex = 0x046;
+    public static final int GetIsReference = 0x088;
+    public static final int GetIsUsedItem = 0x0f6;
+    public static final int GetItemCount = 0x02f;
+    public static final int GetLineOfSight = 0x01b;
+    public static final int GetPCExpelled = 0x0c1;
+    public static final int GetPCFactionAttack = 0x0c7;
+    public static final int GetPCFactionMurder = 0x0c3;
+    public static final int GetPCFactionSteal = 0x0c5;
+    public static final int GetPCFactionSubmitAuthority = 0x0c9;
+    public static final int GetPCInFaction = 0x084;
+    public static final int GetPCIsClass = 0x081;
+    public static final int GetPCIsRace = 0x082;
+    public static final int GetQuestRunning = 0x038;
+    public static final int GetQuestVariable = 0x04f;
+    public static final int GetScriptVariable = 0x035;
+    public static final int GetShouldAttack = 0x042;
+    public static final int GetStage = 0x03a;
+    public static final int GetStageDone = 0x03b;
+    public static final int GetTalkedToPCParam = 0x0ac;
+    public static final int HasMagicEffect = 0x0d6;
+    public static final int IsCellOwner = 0x118;
+    public static final int IsCurrentFurnitureObj = 0x0a3;
+    public static final int IsCurrentFurnitureRef = 0x0a2;
+    public static final int IsOwner = 0x116;
+    public static final int IsSpellTarget = 0x0df;
+    public static final int SameFaction = 0x02a;
+    public static final int SameRace = 0x02b;
+    public static final int SameSex = 0x02c;
+    
+    public static final HashMap<String, Integer> funcCodeMap = new HashMap<String, Integer>()
+    {
+    	{
+    		put ("GetCrime", GetCrime);
+    		put ("GetDeadCount", GetDeadCount);
+    		put ("GetDetected", GetDetected);
+    		put ("GetDetectionLevel", GetDetectionLevel);
+    		put ("GetDisposition", GetDisposition);
+    		put ("GetDistance", GetDistance);
+    		put ("GetEquipped", GetEquipped);
+    		put ("GetFactionRank", GetFactionRank);
+    		put ("GetFactionRankDifference", GetFactionRankDifference);
+    		put ("GetFriendHit", GetFriendHit);
+    		put ("GetGlobalValue", GetGlobalValue);
+    		put ("GetHeadingAngle", GetHeadingAngle);
+    		put ("GetInCell", GetInCell);
+    		put ("GetInCellParam", GetInCellParam);
+    		put ("GetInFaction", GetInFaction);
+    		put ("GetInSameCell", GetInSameCell);
+    		put ("GetInWorldspace", GetInWorldspace);
+    		put ("GetIsClass", GetIsClass);
+    		put ("GetIsClassDefault", GetIsClassDefault);
+    		put ("GetIsCurrentPackage", GetIsCurrentPackage);
+    		put ("GetIsCurrentWeather", GetIsCurrentWeather);
+    		put ("GetIsID", GetIsID);
+    		put ("GetIsPlayerBirthsign", GetIsPlayerBirthsign);
+    		put ("GetIsRace", GetIsRace);
+    		put ("GetIsSex", GetIsSex);
+    		put ("GetIsReference", GetIsReference);
+    		put ("GetIsUsedItem", GetIsUsedItem);
+    		put ("GetItemCount", GetItemCount);
+    		put ("GetLineOfSight", GetLineOfSight);
+    		put ("GetPCExpelled", GetPCExpelled);
+    		put ("GetPCFactionAttack", GetPCFactionAttack);
+    		put ("GetPCFactionMurder", GetPCFactionMurder);
+    		put ("GetPCFactionSteal", GetPCFactionSteal);
+    		put ("GetPCFactionSubmitAuthority", GetPCFactionSubmitAuthority);
+    		put ("GetPCInFaction", GetPCInFaction);
+    		put ("GetPCIsClass", GetPCIsClass);
+    		put ("GetPCIsRace", GetPCIsRace);
+    		put ("GetQuestRunning", GetQuestRunning);
+    		put ("GetQuestVariable", GetQuestVariable);
+    		put ("GetScriptVariable", GetScriptVariable);
+    		put ("GetShouldAttack", GetShouldAttack);
+    		put ("GetStage", GetStage);
+    		put ("GetStageDone", GetStageDone);
+    		put ("GetTalkedToPCParam", GetTalkedToPCParam);
+    		put ("HasMagicEffect", HasMagicEffect);
+    		put ("IsCellOwner", IsCellOwner);
+    		put ("IsCurrentFurnitureObj", IsCurrentFurnitureObj);
+    		put ("IsCurrentFurnitureRef", IsCurrentFurnitureRef);
+    		put ("IsOwner", IsOwner);
+    		put ("IsSpellTarget", IsSpellTarget);
+    		put ("SameFaction", SameFaction);
+    		put ("SameRace", SameRace);
+    		put ("SameSex", SameSex);
+    	}
+    };
+    
+    public static final HashMap<Integer, String> funcCodeNameMap = new HashMap<Integer, String>()
+    {
+    	{
+    		put (GetCrime, "GetCrime");
+    		put (GetDeadCount, "GetDeadCount");
+    		put (GetDetected, "GetDetected");
+    		put (GetDetectionLevel, "GetDetectionLevel");
+    		put (GetDisposition, "GetDisposition");
+    		put (GetDistance, "GetDistance");
+    		put (GetEquipped, "GetEquipped");
+    		put (GetFactionRank, "GetFactionRank");
+    		put (GetFactionRankDifference, "GetFactionRankDifference");
+    		put (GetFriendHit, "GetFriendHit");
+    		put (GetGlobalValue, "GetGlobalValue");
+    		put (GetHeadingAngle, "GetHeadingAngle");
+    		put (GetInCell, "GetInCell");
+    		put (GetInCellParam, "GetInCellParam");
+    		put (GetInFaction, "GetInFaction");
+    		put (GetInSameCell, "GetInSameCell");
+    		put (GetInWorldspace, "GetInWorldspace");
+    		put (GetIsClass, "GetIsClass");
+    		put (GetIsClassDefault, "GetIsClassDefault");
+    		put (GetIsCurrentPackage, "GetIsCurrentPackage");
+    		put (GetIsCurrentWeather, "GetIsCurrentWeather");
+    		put (GetIsID, "GetIsID");
+    		put (GetIsPlayerBirthsign, "GetIsPlayerBirthsign");
+    		put (GetIsRace, "GetIsRace");
+    		put (GetIsSex, "GetIsSex");
+    		put (GetIsReference, "GetIsReference");
+    		put (GetIsUsedItem, "GetIsUsedItem");
+    		put (GetItemCount, "GetItemCount");
+    		put (GetLineOfSight, "GetLineOfSight");
+    		put (GetPCExpelled, "GetPCExpelled");
+    		put (GetPCFactionAttack, "GetPCFactionAttack");
+    		put (GetPCFactionMurder, "GetPCFactionMurder");
+    		put (GetPCFactionSteal, "GetPCFactionSteal");
+    		put (GetPCFactionSubmitAuthority, "GetPCFactionSubmitAuthority");
+    		put (GetPCInFaction, "GetPCInFaction");
+    		put (GetPCIsClass, "GetPCIsClass");
+    		put (GetPCIsRace, "GetPCIsRace");
+    		put (GetQuestRunning, "GetQuestRunning");
+    		put (GetQuestVariable, "GetQuestVariable");
+    		put (GetScriptVariable, "GetScriptVariable");
+    		put (GetShouldAttack, "GetShouldAttack");
+    		put (GetStage, "GetStage");
+    		put (GetStageDone, "GetStageDone");
+    		put (GetTalkedToPCParam, "GetTalkedToPCParam");
+    		put (HasMagicEffect, "HasMagicEffect");
+    		put (IsCellOwner, "IsCellOwner");
+    		put (IsCurrentFurnitureObj, "IsCurrentFurnitureObj");
+    		put (IsCurrentFurnitureRef, "IsCurrentFurnitureRef");
+    		put (IsOwner, "IsOwner");
+    		put (IsSpellTarget, "IsSpellTarget");
+    		put (SameFaction, "SameFaction");
+    		put (SameRace, "SameRace");
+    		put (SameSex, "SameSex");
+    	}
+    };
+    
+	public static String getFuncCodeName(int funcCodeType)
+	{
+		if (!funcCodeNameMap.containsKey(funcCodeType))
+			return String.format("Unknown Oblivion function: %04X", funcCodeType);
+		else return funcCodeNameMap.get(funcCodeType); 
+	}
+	
+    // Array for pop-up. Change anything here, make sure to change the maps above.
+    public static final String[] funcCodeList =
+    {
+    	"GetCrime",
+    	"GetDeadCount",
+    	"GetDetected",
+    	"GetDetectionLevel",
+    	"GetDisposition",
+    	"GetDistance",
+    	"GetEquipped",
+    	"GetFactionRank",
+    	"GetFactionRankDifference",
+    	"GetFriendHit",
+    	"GetGlobalValue",
+    	"GetHeadingAngle",
+    	"GetInCell",
+    	"GetInCellParam",
+    	"GetInFaction",
+    	"GetInSameCell",
+    	"GetInWorldspace",
+    	"GetIsClass",
+    	"GetIsClassDefault",
+    	"GetIsCurrentPackage",
+    	"GetIsCurrentWeather",
+    	"GetIsID",
+    	"GetIsPlayerBirthsign",
+    	"GetIsRace",
+    	"GetIsReference",
+    	"GetIsSex",
+    	"GetIsUsedItem",
+    	"GetItemCount",
+    	"GetLineOfSight",
+    	"GetPCExpelled",
+    	"GetPCFactionAttack",
+    	"GetPCFactionMurder",
+    	"GetPCFactionSteal",
+    	"GetPCFactionSubmitAuthority",
+    	"GetPCInFaction",
+    	"GetPCIsClass",
+    	"GetPCIsRace",
+    	"GetQuestRunning",
+    	"GetQuestVariable",
+    	"GetScriptVariable",
+    	"GetShouldAttack",
+    	"GetStage",
+    	"GetStageDone",
+    	"GetTalkedToPCParam",
+    	"HasMagicEffect",
+    	"IsCellOwner",
+    	"IsCurrentFurnitureObj",
+    	"IsCurrentFurnitureRef",
+    	"IsOwner",
+    	"IsSpellTarget",
+    	"SameFaction",
+    	"SameRace",
+    	"SameSex",
+    };
+
+    // Two arrays solely for pop-up selection
+
+	public static boolean isValid(int param)
+	{
+		return (param == GetCrime || 
+				param == GetDeadCount ||
+				param == GetDetected ||
+				param == GetDetectionLevel ||
+				param == GetDisposition ||
+				param == GetDistance ||
+				param == GetEquipped ||
+				param == GetFactionRank ||
+				param == GetFactionRankDifference ||
+				param == GetFriendHit ||
+				param == GetGlobalValue ||
+				param == GetHeadingAngle ||
+				param == GetInCell ||
+				param == GetInCellParam ||
+				param == GetInFaction ||
+				param == GetInSameCell ||
+				param == GetInWorldspace ||
+				param == GetIsClass ||
+				param == GetIsClassDefault ||
+				param == GetIsCurrentPackage ||
+				param == GetIsCurrentWeather ||
+				param == GetIsID ||
+				param == GetIsPlayerBirthsign ||
+				param == GetIsRace ||
+				param == GetIsSex ||
+				param == GetIsReference ||
+				param == GetIsUsedItem ||
+				param == GetItemCount ||
+				param == GetLineOfSight ||
+				param == GetPCExpelled ||
+				param == GetPCFactionAttack ||
+				param == GetPCFactionMurder ||
+				param == GetPCFactionSteal ||
+				param == GetPCFactionSubmitAuthority ||
+				param == GetPCInFaction ||
+				param == GetPCIsClass ||
+				param == GetPCIsRace ||
+				param == GetQuestRunning ||
+				param == GetQuestVariable ||
+				param == GetScriptVariable ||
+				param == GetShouldAttack ||
+				param == GetStage ||
+				param == GetStageDone ||
+				param == GetTalkedToPCParam ||
+				param == HasMagicEffect ||
+				param == IsCellOwner ||
+				param == IsCurrentFurnitureObj ||
+				param == IsCurrentFurnitureRef ||
+				param == IsOwner ||
+				param == IsSpellTarget ||
+				param == SameFaction ||
+				param == SameRace ||
+				param == SameSex);
+	}
+}
+

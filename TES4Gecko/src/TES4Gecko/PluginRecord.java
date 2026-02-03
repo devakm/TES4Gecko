@@ -1,0 +1,1353 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Properties;
+import java.util.zip.*;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+
+/**
+ * The plugin record represents a game object and contains one or more subrecords that
+ * specify the object properties
+ */
+public class PluginRecord extends SerializedElement implements Cloneable {
+    
+    /** Dummy editor ID */
+    private static final String dummyEditorID = new String();
+    
+    /** Record type */
+    private String recordType;
+    
+    /** Record flags 1 */
+    private int recordFlags1;
+    
+    /** Record flags 2 */
+    private int recordFlags2;
+    
+    /** Form ID */
+    private int formID;
+    
+    /** Editor ID */
+    private String editorID;
+    
+    /** Record data position */
+    private long recordPosition = -1;
+    
+    /** Record data length */
+    private int recordLength;
+    
+    /** Record data digest */
+    private byte[] digest;
+    
+    /** Parent record */
+    private PluginRecord parentRecord;
+    
+    /**
+     * Create a new plugin record with default values
+     *
+     * @param       recordType      The record type
+     */
+    public PluginRecord(String recordType) {
+        this.recordType = recordType;
+        this.editorID = dummyEditorID;
+    }
+    
+    /**
+     * Create a new plugin record with the specified record type and form ID
+     *
+     * @param       recordType      The record type
+     * @param       formID          The form ID
+     */
+    public PluginRecord(String recordType, int formID) {
+        this.recordType = recordType;
+        this.formID = formID;
+        this.editorID = dummyEditorID;
+    }
+    
+    /**
+     * Create a new plugin record based on the supplied record prefix
+     *
+     * @param       prefix          The 20-byte record prefix
+     */
+    public PluginRecord(byte[] prefix) {
+        if (prefix.length != 20)
+            throw new IllegalArgumentException("The record prefix is not 20 bytes");
+
+        //
+        // Record prefix:
+        //   Bytes 00-03: Record type
+        //   Bytes 04-07: Record length (does not include the 20-byte prefix)
+        //   Bytes 08-11: Record flags 1
+        //   Bytes 12-15: Form ID
+        //   Bytes 16-19: Record flags 2
+        //
+        recordType = new String(prefix, 0, 4);
+        editorID = dummyEditorID;
+        formID = getInteger(prefix, 12);
+        recordFlags1 = getInteger(prefix, 8);
+        recordFlags2 = getInteger(prefix, 16);
+    }
+    
+    /**
+     * Get the parent record
+     *
+     * @return                      The parent record or null
+     */
+    public PluginRecord getParent() {
+        return parentRecord;
+    }
+    
+    /**
+     * Set the parent record
+     *
+     * @param       parent          The parent record
+     */
+    public void setParent(PluginRecord parent) {
+        parentRecord = parent;
+    }
+
+    /**
+     * Check if the record is deleted
+     *
+     * @return                      TRUE if the record is deleted
+     */
+    public boolean isDeleted() {
+        return ((recordFlags1&0x0020)!=0);
+    }
+    
+    /**
+     * Set the delete status for the record
+     *
+     * @param       deleted         TRUE if the record is deleted
+     */
+    public void setDelete(boolean deleted) {
+        if (deleted)
+            recordFlags1 |= 0x0020;
+        else if ((recordFlags1&0x0020) != 0)
+            recordFlags1 ^= 0x0020;
+    }
+    
+    /**
+     * Check if the record is ignored
+     *
+     * @return                      TRUE if the record is ignored
+     */
+    public boolean isIgnored() {
+        return ((recordFlags1&0x1000)!=0);
+    }
+    
+    /**
+     * Set the ignore status for the record
+     *
+     * @param       ignored         TRUE to ignore the record
+     */
+    public void setIgnore(boolean ignored) {
+        if (ignored)
+            recordFlags1 |= 0x1000;
+        else if ((recordFlags1&0x1000) != 0)
+            recordFlags1 ^= 0x1000;
+    }
+    
+    /**
+     * Check if the record data is compressed
+     *
+     * @return                      TRUE if the record data is compressed
+     */
+    public boolean isCompressed() {
+        return ((recordFlags1&0x40000) != 0);
+    }
+    
+    /**
+     * Return the record type
+     *
+     * @return                      The record type
+     */
+    public String getRecordType() {
+        return recordType;
+    }
+    
+    /**
+     * Return the record flags
+     *
+     * @return                      Record flags
+     */
+    public int getRecordFlags() {
+        return recordFlags1;
+    }
+    
+    /**
+     * Return the Form ID
+     *
+     * @return                      The Form ID
+     */
+    public int getFormID() {
+        return formID;
+    }
+    
+    /** Set the Form ID
+     *
+     * @param                       The Form ID
+     */
+    public void setFormID(int formID) {
+        this.formID = formID;
+    }
+    
+    /**
+     * Return the Editor ID
+     *
+     * @return                      The Editor ID
+     */
+    public String getEditorID() {
+        return editorID;
+    }
+    
+    /**
+     * Set the Editor ID
+     *
+     * @param       editorID                The Editor ID
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public void setEditorID(String editorID) throws DataFormatException, IOException, PluginException {
+        
+        //
+        // Set the editor ID
+        //
+        this.editorID = editorID;
+        
+        //
+        // Remove an existing EDID subrecord
+        //
+        List<PluginSubrecord> subrecords = getSubrecords();
+        ListIterator<PluginSubrecord> lit = subrecords.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord subrecord = lit.next();
+            if (subrecord.getSubrecordType().equals("EDID")) {
+                lit.remove();
+                break;
+            }
+        }
+        
+        //
+        // Create a new EDID subrecord
+        //
+        byte[] edidData = editorID.getBytes();
+        byte[] subrecordData = new byte[edidData.length+1];
+        System.arraycopy(edidData, 0, subrecordData, 0, edidData.length);
+        subrecordData[edidData.length] = 0;
+        PluginSubrecord edidSubrecord = new PluginSubrecord(recordType, "EDID", subrecordData);
+        subrecords.add(0, edidSubrecord);
+        setSubrecords(subrecords);
+    }
+    
+    /**
+     * Return the record length.  This will be the compressed data length if the
+     * record is compressed.
+     *
+     * @return                              The record data length
+     */
+    public int getRecordLength() {
+        return recordLength;
+    }
+    
+    /**
+     * Return the record data digest.
+     *
+     * @return                              The MD5 digest or null if there is no digest
+     */
+    public byte[] getDigest() {
+        return digest;
+    }
+    
+    /**
+     * Return the record data.  A compressed record will be expanded.  The setRecordData()
+     * method should be used to modify the record data since the returned array may not
+     * be the actual record data array.
+     *
+     * @return                              The record data
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public byte[] getRecordData() throws DataFormatException, IOException, PluginException {
+
+        //
+        // Return a zero-length byte array if there is no record data
+        //
+        if (recordLength == 0)
+            return new byte[0];
+        
+        //
+        // Read the record data from the spill file
+        //
+        byte[] recordData = Main.pluginSpill.read(recordPosition, recordLength);
+        
+        //
+        // Nothing special if the record data is not compressed
+        //
+        if (!isCompressed())
+            return recordData;
+        
+        //
+        // Sanity check the uncompressed data length
+        //
+        if (recordData.length < 5 || recordData[3] >= 0x20)
+            throw new PluginException("Compressed data prefix is not valid");
+        
+        //
+        // Expand the record data
+        //
+        int length = getInteger(recordData, 0);
+        byte[] buffer = new byte[length];
+        Inflater expand = new Inflater();
+        expand.setInput(recordData, 4, recordData.length-4);
+        int count = expand.inflate(buffer);
+        if (count != length)
+            throw new PluginException("Expanded data less than data length");
+
+        expand.end();
+//        if (Main.debugMode)
+//        	System.out.printf("getRecordData: Compressed data type: %s form ID: [%08X] length before decompression: %d length after: %d\n",
+//        			this.getRecordType(), this.getFormID(), recordData.length-4, length);
+
+        return buffer;
+    }
+    
+    /**
+     * Set the record data.  The data will be compressed if the original record data
+     * was compressed.  The record becomes the owner of the data array.
+     *
+     * @param       buffer                  The new record data
+     * @exception   DataFormatException     Error while compressing data
+     * @exception   IOException             An I/O error occurred
+     */
+    public void setRecordData(byte[] buffer) throws DataFormatException, IOException {
+        byte[] recordData;
+        
+        //
+        // Compress the record data if this is a compressed record
+        //
+        if (isCompressed()) {
+            int length = buffer.length;
+            Deflater comp = new Deflater(6);
+            comp.setInput(buffer);
+            comp.finish();
+            byte[] compBuffer = new byte[length+20];
+            int compLength = comp.deflate(compBuffer);
+            if (compLength == 0)
+                throw new DataFormatException("Unable to compress "+recordType+" record "+editorID);
+            
+            if (!comp.finished())
+                throw new DataFormatException("Compressed buffer is too small");
+            
+            comp.end();
+            recordData = new byte[4+compLength];
+            setInteger(length, recordData, 0);
+            System.arraycopy(compBuffer, 0, recordData, 4, compLength);
+        } else {
+            recordData = buffer;
+        } 
+        
+        //
+        // Write the record data to the spill file
+        //
+        recordPosition = Main.pluginSpill.write(recordData);
+        recordLength = recordData.length;
+        
+        //
+        // Compute the MD5 digest for the new record data
+        //
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            md.update(recordData);
+            digest = md.digest();
+        } catch (NoSuchAlgorithmException exc) {
+            throw new UnsupportedOperationException("MD5 digest algorithm is not supported", exc);
+        }
+    }
+    
+    /**
+     * Return the subrecords for this record
+     *
+     * @return                              The subrecords
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public List<PluginSubrecord> getSubrecords() throws DataFormatException, IOException, PluginException {
+        List<PluginSubrecord> subrecordList = new ArrayList<PluginSubrecord>();
+        byte[] recordData = getRecordData();
+        int offset = 0;
+        int overrideLength = 0;
+            
+        //
+        // Process the subrecords.  Note that PluginRecord.load() has already scanned
+        // the subrecords and will have flagged any structural errors.
+        //
+        while (offset < recordData.length) {
+            String subrecordType = new String(recordData, offset, 4);
+            int subrecordLength = getShort(recordData, offset+4);
+            if (subrecordType.equals("XXXX")) {
+                overrideLength = getInteger(recordData, offset+6);
+            } else {
+                if (subrecordLength == 0) {
+                    subrecordLength = overrideLength;
+                    overrideLength = 0;
+                }
+                    
+                byte[] subrecordData = new byte[subrecordLength];
+                System.arraycopy(recordData, offset+6, subrecordData, 0, subrecordLength);
+                subrecordList.add(new PluginSubrecord(recordType, subrecordType, subrecordData));
+            }
+                
+            offset += 6+subrecordLength;        
+        }
+        
+        return subrecordList;
+    }
+    
+    /**
+     * Adds an additional subrecord of the type given with the data given.
+     * "Additional" means that there has to be at least one of that type of
+     * subrecord already in the record. The new subrecord will be inserted
+     * after the last one of that type. The subrecords are saved after that.
+
+     * 
+     *  SACarrow, 2 Jan 2008
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       subrecordData           The subrecord data
+     * @return      boolean                 true if subrecord added
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean addAdditionalSubrecord(String subrecordType, Object subrecordData)
+    throws DataFormatException, IOException, PluginException
+    {
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String, int[] and byte[]. There is however no checking to ensure that
+    	// data type matches the subrecord type.
+    	byte[] dataBytes = convertToByteArray(subrecordData);
+    	boolean typeFound = false;
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        PluginSubrecord newSub = new PluginSubrecord(getRecordType(), subrecordType, dataBytes);
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord checkSubrecord = lit.next();
+            if (!(checkSubrecord.getSubrecordType().equals(subrecordType)))
+            {
+            	if (typeFound) // Back up one, insert and return.
+            	{
+            		lit.previous();
+            		lit.add(newSub);
+                	setSubrecords(subrecordList);
+            		return true;
+            	}
+            }
+            else
+            {
+            	continue;
+            }
+            typeFound = true;
+            if (checkSubrecord.equals(newSub))
+            // Won't add a duplicate, but unsure whether to throw an exception or not.
+            {
+            	return false;
+            }
+        }
+        // I fwe're here nothing was ever added.
+        return false;
+    }
+
+    /**
+     * Inserts a subrecord of the type given with the data given after the
+     * last occurrence of the subrecord type given as the last arg.
+     * The subrecords are saved after that. If there is no subrecord of the
+     * "after" type, nothing is inserted.
+     * 
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       subrecordData           The subrecord data
+     * @param       subrecordAfterType      The subrecord type after which record is inserted
+     * @return      boolean                 true if subrecord added
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean insertSubrecordAfter(String subrecordType, Object subrecordData, String subrecordAfterType)
+    throws DataFormatException, IOException, PluginException
+    {
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String, int[] and byte[]. There is however no checking to ensure that
+    	// data type matches the subrecord type.
+    	byte[] dataBytes = convertToByteArray(subrecordData);
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        PluginSubrecord newSub = new PluginSubrecord(getRecordType(), subrecordType, dataBytes);
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator(subrecordList.size());
+        while (lit.hasPrevious())
+        {
+            PluginSubrecord checkSubrecord = lit.previous();
+            if (checkSubrecord.getSubrecordType().equals(subrecordAfterType))
+            {
+        		lit.next();
+        		lit.add(newSub);
+            	setSubrecords(subrecordList);
+        		return true;
+            }
+            else
+            {
+            	continue;
+            }
+        }
+        // If we're here nothing was ever added.
+        return false;
+    }
+
+    /**
+     * Adds a subrecord of the type given with the data given after the last subrecord.
+     * The subrecords are saved after that. No order or duplication checks are made
+     * 
+     *  SACarrow, 2 Jan 2008
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       subrecordData           The subrecord data
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public void addSubrecord(String subrecordType, Object subrecordData)
+    throws DataFormatException, IOException, PluginException
+    {
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String, int[] and byte[]. There is however no checking to ensure that
+    	// data type matches the subrecord type.
+    	byte[] dataBytes = convertToByteArray(subrecordData);
+    	boolean typeFound = false;
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        PluginSubrecord newSub = new PluginSubrecord(getRecordType(), subrecordType, dataBytes);
+        subrecordList.add(newSub);
+    	setSubrecords(subrecordList);
+
+    }
+
+    /**
+     * Change a subrecord of the type and data given with the new data.
+     * The subrecords are saved after that.
+     * 
+     *  SACarrow, 3 Jan 2008
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       oldSubData              The subrecord data to be replaced
+     * @param       newSubData              The subrecord data to replace with
+     * @return      boolean                 true if subrecord changed
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean changeSubrecord(String subrecordType, Object oldSubData, Object newSubData)
+    throws DataFormatException, IOException, PluginException
+    {
+    	// Have to be the same type.
+    	if (!(oldSubData.getClass().equals(newSubData.getClass())))
+    		throw new DataFormatException("changeSubrecord: Argument 2 is of class " 
+    				+ oldSubData.getClass()
+    				+ " while argument 3 is of class " + newSubData.getClass());
+
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String and byte[]. There is however no checking to ensure that
+    	// data type matches the subrecord type.
+    	byte[] oldDataBytes = convertToByteArray(oldSubData);
+    	byte[] newDataBytes = convertToByteArray(newSubData);
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        PluginSubrecord oldSub = new PluginSubrecord(getRecordType(), subrecordType, oldDataBytes);
+        PluginSubrecord newSub = new PluginSubrecord(getRecordType(), subrecordType, newDataBytes);
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord checkSubrecord = lit.next();
+            if (checkSubrecord.equals(oldSub)) // Change this one.
+            {
+            	lit.set(newSub);
+            	setSubrecords(subrecordList);
+            	return true;
+            }
+        }
+        // If we're here nothing was ever changed.
+        return false;
+    }
+    
+    /**
+     * Checks for a subrecord with the type and data given.
+     * The record itself is not changed.
+     * 
+     *  SACarrow
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       subData                 The subrecord data to be found
+     * @return      boolean                 true if subrecord found
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean hasSubrecordWithData(String subrecordType, Object subrecData)
+    throws DataFormatException, IOException, PluginException
+    {
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String and byte[]. There is however no checking to ensure that
+    	// data type matches the subrecord type.
+    	byte[] dataBytes = convertToByteArray(subrecData);
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        PluginSubrecord checkRec = new PluginSubrecord(getRecordType(), subrecordType, dataBytes);
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord checkSubrecord = lit.next();
+            if (checkSubrecord.equals(checkRec)) // Found it.
+            {
+            	return true;
+            }
+        }
+        // If we're here nothing was ever found.
+        return false;
+    }
+    
+    /**
+     * Removes subrecords given a set of subrecord types; the flag determines
+     * whether the removals are all that are IN the set or all that are NOT IN
+     * the set. The subrecords are saved if at least one subrecord was removed.
+     * 
+     *  SACarrow, 2 Jan 2008
+     *
+     * @param       subrecordTypes          The set of subrecord types
+     * @param       notInSet                True if removing those NOT IN the set.
+     * @return      boolean                 true if subrecords removed
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean removeSubrecords(HashSet<String> subrecordTypes, boolean notInSet)
+    throws DataFormatException, IOException, PluginException
+    {
+    	boolean atLeastOne = false;
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext())
+        {
+            PluginSubrecord subrec = lit.next();
+            if (notInSet ^ subrecordTypes.contains(subrec.getSubrecordType()))
+            {
+            	lit.remove();
+            	setSubrecords(subrecordList);
+            	atLeastOne = true;
+            }
+            else
+            {
+            	continue;
+            }
+        }
+        if (atLeastOne)
+        {
+        	setSubrecords(subrecordList);
+        }
+        return atLeastOne;
+    }
+
+    /**
+     * Removes CTDA subrecords given a set of function codes; the flag determines
+     * whether the removals are all that are IN the set or all that are NOT IN
+     * the set. The subrecords are saved if at least one subrecord was removed.
+     * 
+     * @param       functionCodes           The set of function codes
+     * @param       notInSet                True if removing those NOT IN the set.
+     * @return      boolean                 true if subrecords removed
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean removeCTDASubrecords(HashSet<Integer> functionCodes, boolean notInSet)
+    throws DataFormatException, IOException, PluginException
+    {
+    	boolean atLeastOne = false;
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext())
+        {
+            PluginSubrecord subrec = lit.next();
+            if (!subrec.getSubrecordType().equals("CTDA")) continue;
+            byte subrecordData[] = subrec.getSubrecordData();
+            int functionCode = getInteger(subrecordData, 8);
+            
+            if (notInSet ^ functionCodes.contains(functionCode))
+            {
+            	lit.remove();
+            	setSubrecords(subrecordList);
+            	atLeastOne = true;
+            }
+            else
+            {
+            	continue;
+            }
+        }
+        if (atLeastOne)
+        {
+        	setSubrecords(subrecordList);
+        }
+        return atLeastOne;
+    }
+
+    /**
+     * A specialization of the call above for the case of one subrecord type that
+     * is in the set.
+     * 
+     *  SACarrow, 3 Aug 2008
+     *
+     * @param       subrecordType           The subrecord type
+     * @return      boolean                 true if subrecords removed
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean removeSubrecords(String subrecordType)
+    throws DataFormatException, IOException, PluginException
+    {
+    	HashSet<String> onlyOne = new HashSet<String>(1); 
+    	onlyOne.add(subrecordType);
+    	return removeSubrecords(onlyOne, false);
+    }
+
+    /**
+     * Returns a list of all subrecords of the type given or an empty list if there are none.
+     * 
+     *  SACarrow
+     *
+     * @param       subrecordType           The subrecord type
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     * @return      List<PluginSubrecord>   List of subrecords of type; empty if none
+     */
+    public List<PluginSubrecord> getAllSubrecords(String subrecordType)
+    throws DataFormatException, IOException, PluginException
+    {
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        List<PluginSubrecord> returnList = new ArrayList<PluginSubrecord>();
+        for (PluginSubrecord sub : subrecordList)
+        {
+        	if (sub.getSubrecordType().equals(subrecordType))
+        		returnList.add(sub);
+        }
+        return returnList;
+    }
+
+    /**
+     * Returns the first subrecord of the type given or null if there are none.
+     * 
+     *  SACarrow
+     *
+     * @param       subrecordType           The subrecord type
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     * @return      PluginSubrecord         First subrecord of type; null if none
+     */
+    public PluginSubrecord getSubrecord(String subrecordType)
+    throws DataFormatException, IOException, PluginException
+    {
+        List<PluginSubrecord> subrecordList = getSubrecords();
+        for (PluginSubrecord sub : subrecordList)
+        {
+        	if (sub.getSubrecordType().equals(subrecordType))
+        		return sub;
+        }
+        return null;
+    }
+
+    /**
+     * Returns true if there is at least one subrecord of the type given.
+     * No exceptions are thrown beyond this call; even one one thrown here, false is returned
+     * 
+     *  SACarrow
+     *
+     * @param       subrecordType   The subrecord type
+     * @return      boolean         true if there is at least one subrecord of the type given.
+     */
+    public boolean hasSubrecordOfType(String subrecordType)
+    {
+    	try
+    	{
+            List<PluginSubrecord> subrecordList = getSubrecords();
+            for (PluginSubrecord sub : subrecordList)
+            {
+            	if (sub.getSubrecordType().equals(subrecordType))
+            		return true;
+            }
+    	}
+    	catch (Exception ex) { return false; }
+        return false;
+    }
+
+
+    /**
+     * Utility method to convert the Object (if of acceptable type) to
+     * a byte array suitable for adding to a subrecord. Acceptable object
+     * types currently are Integer, Long, Short, Float, Double, String,
+     * int[] and byte[].
+     * SACarrow, 3 Jan 2008
+     *
+     * @param       subrecordData           The subrecord data
+     * @return      byte[]                  data in byte array
+     * @exception   DataFormatException     Error if not recognized type
+     */
+    static public byte[] convertToByteArray(Object data)
+    throws DataFormatException
+    {
+    	// Acceptable object types are Integer, Long, Short, Float, Double,
+    	// String, Byte and byte[]. 
+    	byte[] dataBytes = null; // Dummy at the point.
+    	if (data instanceof Byte)
+    	{
+        	dataBytes = new byte[1];
+        	dataBytes[0] = (Byte)data;
+    	}
+    	else if (data instanceof Short)
+    	{
+        	dataBytes = new byte[2];
+    		SerializedElement.setShort(((Short)data).shortValue(), dataBytes, 0);
+    	}
+    	else if (data instanceof Integer)
+    	{
+    		dataBytes = new byte[4];
+    		SerializedElement.setInteger(((Integer)data).intValue(), dataBytes, 0);
+    	} 
+    	else if (data instanceof Long)
+    	{
+    		dataBytes = new byte[8];
+    		SerializedElement.setLong(((Long)data).longValue(), dataBytes, 0);
+    	} 
+    	else if (data instanceof Float)
+    	{
+    		dataBytes = new byte[8];
+    		int tmp =  Float.floatToIntBits(((Float)data).floatValue());
+    		SerializedElement.setInteger(tmp, dataBytes, 0);
+    	} 
+    	else if (data instanceof Double)
+    	{
+    		dataBytes = new byte[8];
+    		long tmp =  Double.doubleToLongBits(((Double)data).doubleValue());
+    		SerializedElement.setLong(tmp, dataBytes, 0);
+    	} 
+    	else if (data instanceof String)
+    	{
+    		dataBytes = new byte[((String)data).length()];
+    		System.arraycopy(((String)data).getBytes(), 0, dataBytes, 0, ((String)data).length());
+    	}
+    	else if (data instanceof int[])
+    	{
+    		dataBytes = new byte[((int[]) data).length * 4];
+    		SerializedElement.setIntegerArray((int[]) data, dataBytes, 0);
+    	} 
+    	else if (data instanceof byte[])
+    	{
+    		dataBytes = (byte[]) data;
+    	}
+    	else throw new DataFormatException("convertToByteArray: Argument is of unrecognized class " 
+    				+ data.getClass());
+   	
+        return dataBytes;
+    }
+    
+    /**
+     * Set the subrecords for this record
+     *
+     * @param       subrecordList           The subrecord list
+     * @exception   DataFormatException     Error while compressing data
+     * @exception   IOException             An I/O error occurred
+     */
+    public void setSubrecords(List<PluginSubrecord> subrecordList) throws DataFormatException, IOException {
+        
+        //
+        // Get the total record data length
+        //
+        int length = 0;
+        for (PluginSubrecord subrecord : subrecordList) {
+            int subrecordLength = subrecord.getSubrecordData().length;
+            length += 6+subrecordLength;
+            if (subrecordLength > 65535)
+                length += 10;
+        }
+          
+        //
+        // Build the record data
+        //
+        byte[] recordData = new byte[length];
+        int offset = 0;
+        for (PluginSubrecord subrecord : subrecordList) {
+            byte[] subrecordData = subrecord.getSubrecordData();
+            int subrecordLength = subrecordData.length;
+            if (subrecordLength > 65535) {
+                System.arraycopy("XXXX".getBytes(), 0, recordData, offset, 4);
+                setShort(4, recordData, offset+4);
+                setInteger(subrecordLength, recordData, offset+6);
+                offset += 10;
+            }
+            
+            System.arraycopy(subrecord.getSubrecordType().getBytes(), 0, recordData, offset, 4);
+            
+            if (subrecordLength > 65535)
+                setShort(0, recordData, offset+4);
+            else
+                setShort(subrecordLength, recordData, offset+4);
+            
+            System.arraycopy(subrecordData, 0, recordData, offset+6, subrecordLength);
+            offset += 6+subrecordLength;
+        }
+        
+        //
+        // Set the record data
+        //
+        setRecordData(recordData);
+    }
+
+    /**
+     * Change the record form ID and update associated subgroups.  The form list and
+     * form map are not updated (and thus an active list iterator is not invalidated)
+     *
+     * @param       newFormID       The new form ID
+     */
+    public void changeFormID(int newFormID) {
+            
+        //
+        // WRLD, CELL and DIAL records are followed by a group with the record form ID
+        // as the group label.  So we need to update the group label when we change
+        // the record form ID.
+        //
+        if (parentRecord != null && parentRecord instanceof PluginGroup) {
+            PluginGroup parentGroup = (PluginGroup)parentRecord;
+            List<PluginRecord> parentList = parentGroup.getRecordList();
+            int index = parentList.indexOf(this);
+            if (index >= 0 && index < parentList.size()-1) {
+                PluginRecord checkRecord = parentList.get(index+1);
+                if (checkRecord instanceof PluginGroup) {
+                    PluginGroup checkGroup = (PluginGroup)checkRecord;
+                    if (checkGroup.getGroupParentID() == formID) {
+                        checkGroup.setGroupParentID(newFormID);
+
+                        //
+                        // A CELL group can contain one or more subgroups which also
+                        // refer to the CELL record.  So we need to change the group
+                        // labels for these groups as well.
+                        //
+                        List<PluginRecord> subgroupList = checkGroup.getRecordList();
+                        for (PluginRecord subgroupRecord : subgroupList) {
+                            if (subgroupRecord instanceof PluginGroup) {
+                                checkGroup = (PluginGroup)subgroupRecord;
+                                if (checkGroup.getGroupParentID() == formID)
+                                    checkGroup.setGroupParentID(newFormID);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        //
+        // Change the record form ID
+        //
+        formID = newFormID;
+    }
+    
+    /**
+     * Update subrecord form ID references when the master list is changed.
+     * The master map array must be the same size as the old master list.
+     *
+     * @param       formAdjust              The form adjustment
+     * @return                              TRUE if the record was modified
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    public boolean updateReferences(FormAdjust formAdjust)
+                                            throws DataFormatException, IOException, PluginException {
+        boolean recordModified = false;
+        List<PluginSubrecord> subrecords = getSubrecords();
+        for (PluginSubrecord subrecord : subrecords) {
+            boolean subrecordModified = false;
+            byte[] subrecordData = subrecord.getSubrecordData();
+            int[][] references = subrecord.getReferences();
+            if (references == null || references.length == 0)
+                continue;
+                  
+            //
+            // Process each reference in the current subrecord
+            //
+            for (int i=0; i<references.length; i++) {
+                int offset = references[i][0];
+                int oldFormID = references[i][1];
+                if (oldFormID == 0)
+                    continue;
+
+                int newFormID = formAdjust.adjustFormID(oldFormID);
+                if (newFormID != oldFormID) {
+                    setInteger(newFormID, subrecordData, offset);
+                    subrecordModified = true;
+                }
+            }
+
+            //
+            // Store the updated subrecord data
+            //
+            if (subrecordModified) {
+                subrecord.setSubrecordData(subrecordData);
+                recordModified = true;
+            }
+        }
+                
+        //
+        // Store the updated subrecords
+        //
+        if (recordModified)
+            setSubrecords(subrecords);
+        
+        return recordModified;
+    }
+    
+    /**
+     * Returns a list of all PluginRecords in the PluginGroup. The degenerate case;
+     * simply returns a list of 1, the leaf node PluginRecord itself.
+     * 
+     * @return                      The list of PluginRecords
+     */
+    List<PluginRecord> getAllPluginRecords()
+    {
+    	ArrayList<PluginRecord> recList = new ArrayList<PluginRecord>();
+    	recList.add(this);
+    	return recList;
+    }
+    
+    /**
+     * Returns a list of all actively deleted (not ignored) PluginRecords in the PluginGroup. 
+     * The degenerate case simply returns a list of 1, the leaf node PluginRecord itself if deleted.
+     * 
+     * @return                      The list of PluginRecords
+     */
+    List<PluginRecord> getDeletedPluginRecords()
+    {
+    	ArrayList<PluginRecord> recList = new ArrayList<PluginRecord>();
+    	if (isDeleted()) recList.add(this);
+    	return recList;
+    }
+    
+    /**
+     * Get the hash code for this record.  The form ID is used for the hash code, so
+     * two records with the same form ID will have the same hash code.
+     *
+     * @return                      The hash code
+     */
+    public int hashCode() {
+        return formID;
+    }
+
+    /**
+     * Determine if this record is equal to another record.  Two records are considered to be
+     * equal if they have the same record type and Form ID.  However, two GMST records are
+     * considered to be equal if they have the same Editor ID.
+     *
+     * @param       object          The object to be compared
+     */
+    public boolean equals(Object object) {
+        boolean areEqual = false;
+        if (object instanceof PluginRecord) {
+            PluginRecord objRecord = (PluginRecord)object;
+            if (objRecord.getRecordType().equals(recordType)) {
+                if (recordType.equals("GMST")) {
+                    if (objRecord.getEditorID().equals(editorID))
+                        areEqual = true;
+                } else if (objRecord.getFormID() == formID) {
+                    areEqual = true;
+                }
+            }
+        }
+        
+        return areEqual;
+    }
+    
+    /**
+     * Determine if this record is identical to another record.  Two records are considered
+     * to be identical if they have the same record type, form ID, and record data.
+     *
+     * @param       record                  The record to be compared
+     */
+    public boolean isIdentical(PluginRecord record) {
+        boolean areIdentical = false;
+        
+        //
+        // See if the records are equal (same record type, form ID and flags)
+        //
+        boolean areEqual = equals(record);
+        if (areEqual) {
+            int cmpFlags1 = record.getRecordFlags();
+            if ((recordFlags1&0xfffbfffe) != (cmpFlags1&0xfffbfffe))
+                areEqual = false;
+        }
+        
+        //
+        // Compare the MD5 checksums to see if the record data is the same.  This improves
+        // performance for identical records since we won't need to read the record data from
+        // the spill file.
+        //
+        if (areEqual) {
+            areIdentical = true;
+            byte[] cmpDigest = record.getDigest();
+            if (digest == null) {
+                if (cmpDigest != null)
+                    areIdentical = false;
+            } else if (cmpDigest == null) {
+                areIdentical = false;
+            } else {
+                for (int i=0; i<digest.length; i++) {
+                    if (digest[i] != cmpDigest[i]) {
+                        areIdentical = false;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        //
+        // Compare the subrecords if the checksums are not the same.  We need to do the compare 
+        // on a subrecord basis because the Construction Set does not store the subrecords in the 
+        // same order each time the plugin is saved.
+        //
+        if (areEqual && !areIdentical) {
+            try {
+                areIdentical = true;
+                List<PluginSubrecord> subrecords = getSubrecords();
+                List<PluginSubrecord> cmpSubrecords = record.getSubrecords();
+                String cmpDisplayValue = "";
+                for (PluginSubrecord subrecord : subrecords) {
+                    ListIterator<PluginSubrecord> lit = cmpSubrecords.listIterator();
+                    areIdentical = false;
+                    while (lit.hasNext()) {
+                        PluginSubrecord cmpSubrecord = lit.next();
+                        try { cmpDisplayValue = cmpSubrecord.getDisplayData(); }
+                        catch (Throwable exc) {
+                        	cmpDisplayValue = "Cannot make display value for subrecord type "
+                        		+ cmpSubrecord.getSubrecordType() + " of record type " + record.getRecordType();
+                        }                        
+                        if (cmpSubrecord.equals(subrecord)) {
+                            areIdentical = true;
+                            lit.remove();
+                            break;
+                        }
+                    }
+
+                    if (!areIdentical) {
+                        if (Main.debugMode)
+                            System.out.printf("Miscompare on %s subrecord [%s vs %s] of %s record %s (%08X)\n",
+                                              subrecord.getSubrecordType(),
+                                              subrecord.getDisplayData(), cmpDisplayValue, recordType, editorID, formID);
+
+                        break;
+                    }
+                }
+                
+                if (areIdentical && cmpSubrecords.size() != 0)
+                    areIdentical = false;
+            } catch (Throwable exc) {
+                areIdentical = false;
+                Main.logException("Unable to compare record data", exc);
+            }
+        }
+        
+        return areIdentical;
+    }
+    
+    /**
+     * Return a string describing the record.  The string will be prefixed with "(Ignore)"
+     * if the record is ignored or "(Deleted)" if the record is deleted.  The string will
+     * include the X-Y coordinates for an exterior cell.
+     *
+     * @return                      The descriptive string
+     */
+    public String toString() {
+        String text = null;
+        
+        if (recordType.equals("CELL") && recordLength > 0 && parentRecord != null && parentRecord instanceof PluginGroup) {
+            PluginGroup parentGroup = (PluginGroup)parentRecord;
+            if (parentGroup.getGroupType() == PluginGroup.EXTERIOR_SUBBLOCK) {
+                try {
+                    List<PluginSubrecord> subrecords = getSubrecords();
+                    for (PluginSubrecord subrecord : subrecords) {
+                        if (subrecord.getSubrecordType().equals("XCLC")) {
+                            byte[] subrecordData = subrecord.getSubrecordData();
+                            text = String.format("CELL (%d,%d) record: %s (%08X)", 
+                                                 getInteger(subrecordData, 0), getInteger(subrecordData, 4),
+                                                 editorID, formID);
+                            break;
+                        }
+                    }
+                } catch (Exception exc) {
+                }
+            }
+        }
+        
+        if (text == null)
+            text = String.format("%s record: %s (%08X)", recordType, editorID, formID);
+        
+        if (isIgnored())
+            text = "(Ignore) "+text;
+        else if (isDeleted())
+            text = "(Deleted) "+text;
+        
+        return text;
+    }
+    
+    /**
+     * Load the record from the input file stream.  The record prefix has already been
+     * processed and the input file is positioned at the start of the record data.  The
+     * record data will be loaded and a new FormInfo containing the Form ID and Editor ID 
+     * will be added to the plugin form list.
+     *
+     * @param       file                    The plugin file
+     * @param       in                      The file input stream
+     * @param       recordLength            The record data length
+     * @exception   DataFormatException     Error while decompressing data
+     * @exception   IOException             Error while reading the plugin file
+     * @exception   PluginException         The record is not valid
+     */
+    public void load(File file, RandomAccessFile in, int recordLength) 
+                                            throws PluginException, IOException, DataFormatException {
+        int offset = 0;
+        int overrideLength = 0;
+        int count, length;
+
+        //
+        // Read the record data into our buffer
+        //
+        byte[] recordData = new byte[recordLength];
+        count = in.read(recordData);
+        if (count != recordLength)
+            throw new PluginException(file.getName()+": "+recordType+" record is incomplete");
+        
+        this.recordPosition = Main.pluginSpill.write(recordData);
+        this.recordLength = recordData.length;
+        
+        //
+        // Compute the MD5 digest for the record data
+        //
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            md.update(recordData);
+            digest = md.digest();
+        } catch (NoSuchAlgorithmException exc) {
+            throw new UnsupportedOperationException("MD5 digest algorithm is not supported", exc);
+        }
+        
+        //
+        // Decompress the record data if necessary
+        //
+        byte[] buffer = getRecordData();
+        int dataLength = buffer.length;
+        
+        //
+        // Scan the subrecords, check for syntax errors and get the editor ID
+        //
+        // We have a special case when the subrecord length does not fit in 2 bytes.  In this case,
+        // the subrecord is preceded by an 'XXXX' subrecord containing the actual subrecord length.
+        //
+        while (dataLength >= 6) {
+            String subrecordType = new String(buffer, offset, 4);
+            length = getShort(buffer, offset+4);
+            if (length == 0) {
+                length = overrideLength;
+                overrideLength = 0;
+            }
+
+            if (length > dataLength)
+                throw new PluginException(file.getName()+": "+subrecordType+" subrecord is incomplete");
+
+            if (length > 0) {
+                if (subrecordType.equals("XXXX")) {
+                    if (length != 4)
+                        throw new PluginException(file.getName()+": XXXX subrecord data length is not 4");
+                    
+                    overrideLength = getInteger(buffer, offset+6);
+                } else if (subrecordType.equals("EDID") && length > 1) {
+                    editorID = new String(buffer, offset+6, length-1);
+                }
+            }
+            
+            offset += 6+length;
+            dataLength -= 6+length;
+        }
+        
+        //
+        // Error if we did not process all of the record data
+        //
+        if (dataLength != 0)
+            throw new PluginException(file.getName()+": "+recordType+" record is incomplete");                
+    }
+    
+    /**
+     * Build the record
+     *
+     * @param       out             The random access output file
+     * @exception   IOException     An I/O error occurred
+     */
+    public void store(RandomAccessFile out) throws IOException {
+        
+        //
+        // Write the record prefix
+        //
+        // Bytes 00-03: Record type
+        // Bytes 04-07: Record length
+        // Bytes 08-11: Flags1
+        // Bytes 12-15: Form ID
+        // Bytes 16-19: Flags2
+        //
+        byte[] prefix = new byte[20];
+        System.arraycopy(recordType.getBytes(),  0, prefix, 0, 4);
+        setInteger(recordLength, prefix, 4);
+        setInteger(recordFlags1, prefix, 8);
+        setInteger(formID, prefix, 12);
+        setInteger(recordFlags2, prefix, 16);
+        out.write(prefix);
+        
+        //
+        // Write the record data
+        //
+        if (recordLength != 0) {
+            byte[] recordData = Main.pluginSpill.read(recordPosition, recordLength);
+            out.write(recordData);
+        }
+    }
+
+    /**
+     * Clone the record.
+     *
+     * @return                      Cloned record
+     */
+    public Object clone() {
+        Object clonedObject;
+        try {
+            clonedObject = super.clone();
+        } catch (CloneNotSupportedException exc) {
+            throw new UnsupportedOperationException("Unable to clone record", exc);
+        }
+
+        return clonedObject;
+    }    
+}

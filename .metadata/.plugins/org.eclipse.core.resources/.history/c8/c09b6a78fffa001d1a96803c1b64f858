@@ -1,0 +1,3764 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Vector;
+import java.util.zip.DataFormatException;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+
+/**
+ * Task to merge two or more plugins into a single plugin file
+ */
+public class MergeTask extends WorkerTask {
+    
+    /** Plugin names */
+    private String[] pluginNames;
+    
+    /** Merged plugin information */
+    private PluginInfo pluginInfo;
+    
+    /** Merge to master */
+    private boolean masterMerge;
+    
+    /** 'Yes to All' flag */
+    private boolean yesToAll = false;
+        
+    /** Plugins to be merged */
+    private Plugin[] plugins;
+
+    /** Merged plugin */
+    private Plugin mergedPlugin;
+
+    /** Merged master list */
+    private List<String> mergedMasterList;
+
+    /** Merged master count */
+    private int mergedMasterCount;
+
+    /** Masters for the merged plugin */
+    private Master[] masters;
+
+    /** Merged Form ID map */
+    private Map<Integer, FormInfo> mergedFormMap;
+
+    /** Merged Editor ID map */
+    private Map<String, FormInfo> mergedEditorMap;
+
+    /** High Form ID */
+    private int highFormID;
+    
+    /** Whether to use a "floor" form ID */
+    private boolean useFloorFormID = false;
+    
+    /** Floor Form ID [0 if unused] */
+    private int floorFormID;
+    
+    static private JFrame parentWindow;
+    
+    /**
+     * Create a plugin merge instance. The plugin information parameter is null
+     * if we are merging a plugin file into an existing master file.
+     *
+     * @param       statusDialog    The status dialog
+     * @param       pluginNames     The plugins to be merged
+     * @param       pluginInfo      The merged plugin information
+     */
+    public MergeTask(StatusDialog statusDialog, String[] pluginNames, PluginInfo pluginInfo) {
+        super(statusDialog);
+        this.pluginNames = pluginNames;
+        this.pluginInfo = pluginInfo;
+        
+        if (pluginInfo == null)
+            masterMerge = true;
+        else
+            masterMerge = false;
+    }
+    
+    /**
+     * Merge a plugin file into a master file
+     *
+     * @param       parent          The parent frame
+     * @param       masterFile      The master file
+     * @param       pluginFile      The plugin file
+     */
+    public static void mergeToMaster(JFrame parent, File masterFile, File pluginFile) {
+    	parentWindow = parent;
+        String[] pluginNames = new String[2];
+        pluginNames[0] = masterFile.getName();
+        pluginNames[1] = pluginFile.getName();
+        mergePlugins(parent, pluginNames, null);
+    }
+    
+    /**
+     * Merge two or more plugin files and create a new merged plugin file
+     *
+     * @param       parent          The parent frame
+     * @param       pluginNames     The plugins to be merged
+     * @param       pluginInfo      The merged plugin information
+     */
+    public static void mergePlugins(JFrame parent, String[] pluginNames, PluginInfo pluginInfo) {
+        
+    	parentWindow = parent;
+        //
+        // Create the status dialog
+        //
+        StatusDialog statusDialog = new StatusDialog(parent, " ", "Merge Plugin");
+        
+        //
+        // Create the worker task
+        //
+        MergeTask worker = new MergeTask(statusDialog, pluginNames, pluginInfo);
+        statusDialog.setWorker(worker);
+        
+        //
+        // Start the worker thread and wait for completion
+        //
+        worker.start();
+        statusDialog.showDialog();
+        
+        //
+        // Display the completion message
+        //
+        if (statusDialog.getStatus() == 1)
+            if (worker.masterMerge)
+                JOptionPane.showMessageDialog(parent, pluginNames[0]+" updated",
+                                              "Merge Plugin", JOptionPane.INFORMATION_MESSAGE);
+            else
+                JOptionPane.showMessageDialog(parent, pluginInfo.getName()+" created",
+                                              "Merge Plugin", JOptionPane.INFORMATION_MESSAGE);
+        else
+            JOptionPane.showMessageDialog(parent, "Merge failed",
+                                          "Merge Plugin", JOptionPane.INFORMATION_MESSAGE);
+    }
+        
+    /**
+     * Run the executable code for the thread
+     */
+    public void run() {
+        boolean completed = false;
+        int i, count;
+        Plugin plugin = null;
+        Master master = null;
+        float version = 0.0f;
+
+        // Find whether the merge should be "managed"; if not, none of the merging inquiry popups
+    	// will appear and default behavior will ensue.
+    	boolean manageMerge = false;
+    	if (masterMerge)
+    	{
+	    	int selection = JOptionPane.showConfirmDialog(parentWindow, 
+	                "<html>Do you wish to manage the merge? Choosing <i>yes</i>\nwill allow for user " +
+	                "intervention at points within the merge;\notherwise default merge behavior will take place.", 
+	                "Manage Merge?", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+	    	if (selection == JOptionPane.YES_OPTION) manageMerge = true;
+    	}
+    	try {
+            //
+            // Load each plugin
+            //
+            plugins = new Plugin[pluginNames.length];
+            for (i=0; i<pluginNames.length; i++) {
+                File inFile = new File(Main.pluginDirectory+Main.fileSeparator+pluginNames[i]);
+                plugin = new Plugin(inFile);
+                plugin.load(this);
+                plugins[i] = plugin;
+                version = Math.max(version, plugin.getVersion());
+            }
+
+            //
+            // Build the merged master list from the plugin master lists. We do
+            // not want to include the merge master if we are merging a plugin
+            // into a master.
+            //
+            for (i=0, count=0; i<plugins.length; i++)
+                count += plugins[i].getMasterList().size();
+
+            mergedMasterList = new ArrayList<String>(count);
+
+            for (i=0; i<plugins.length; i++) {
+                List<String> masterList = plugins[i].getMasterList();
+                for (String masterName : masterList)
+                    if (!mergedMasterList.contains(masterName))
+                        if (!masterMerge || !masterName.equals(pluginNames[0]))
+                            mergedMasterList.add(masterName);
+            }
+
+            mergedMasterCount = mergedMasterList.size();
+            masters = new Master[mergedMasterCount];
+            
+
+            //
+            // Load the master files
+            //
+            i = 0;
+            for (String masterName : mergedMasterList) {
+                File masterFile = new File(Main.pluginDirectory+Main.fileSeparator+masterName);
+                master = new Master(masterFile);
+                master.load(this);
+                masters[i++] = master;
+                version = Math.max(version, master.getVersion());
+            }
+
+            // Only for master merge and when the user wishes to manage the merge:
+            // get the region exterior cell info from the plugin that is to be merged into
+            // the master. Based on that info, go through the master list and the master
+            // to be merged and gather the info for the dialog. None of this silly 
+            // pseudo-generality here either: the master is plugin[0] 
+            // and the to-be-merged plugin is plugin[1]. :)
+            if (masterMerge && manageMerge)
+            {
+            	List<Integer> cellRegionList = plugins[1].getCellRegionsUsed();
+            	if (cellRegionList.size() > 0)
+            	{
+            		Vector<String[]> regionData = new Vector<String[]>(); 
+            		List<String> pluginMasterList = plugins[1].getMasterList();
+            		// For each region found, troll for the plugin where it is defined
+            		// and then go there to find its name and worldspace ID. Then troll
+            		// likewise for the worldspace name.
+            		for (int region : cellRegionList)
+            		{
+            			String pluginName = "<html><i>Plugin Not Found</i><html>";
+            			String regionName = "<html><i>Region Not Found</i><html>";
+            			String worldspaceName = "<html><i>Worldspace Not Found</i><html>";
+            			if (region == Plugin.NoRegionAssignedToCell)
+            			{
+            				// Simply put a dummy entry in regionData and continue.
+                    		String[] regionInfoArray = new String[4];
+            				regionInfoArray[0] = String.format("%08X", Plugin.NoRegionAssignedToCell);
+            				regionInfoArray[1] = pluginName;
+            				regionInfoArray[2] = worldspaceName;
+            				regionInfoArray[3] = regionName;
+            				regionData.add(regionInfoArray);
+            				continue;
+            			}
+            			int masterIdx = region >>> 24;
+            			int worldspaceID = -1;
+            			Object pluginToSearch = null; // Could be Plugin or Master.
+            			if (masterIdx == pluginMasterList.size()) // The plugin itself
+            			{
+            				pluginToSearch = plugins[1];
+            				pluginName = plugins[1].getName();
+            			}
+            			else
+            			{
+            				pluginName = pluginMasterList.get(masterIdx);
+            				int mergedMasterIdx = mergedMasterList.indexOf(pluginName);
+            				if (mergedMasterIdx != -1)
+            				{
+            					pluginToSearch = masters[mergedMasterIdx];
+            				}
+            				else if (pluginName.equalsIgnoreCase(plugins[0].getName()))
+            					// Must be the master to be merged to.
+            				{
+            					pluginToSearch = plugins[0];
+            				}
+            				else // Something is wrong...
+            				{
+            			        if (Main.debugMode)
+            			        {
+            			            System.out.print("MergeTask: Plugin " + pluginName + " for region "
+            			            		+ String.format("%08X", region) + " not found in merge list\n");
+            			        }
+            			        continue;
+            				}
+            			}
+            			// Now for the search itself
+            			PluginRecord pluginRec = null;
+            			if (pluginToSearch instanceof Plugin)
+            			{
+            				FormInfo formInfo = ((Plugin)pluginToSearch).getFormMap().get(region);
+            				if (formInfo != null) pluginRec = (PluginRecord)formInfo.getSource();
+            			}
+            			else if (pluginToSearch instanceof Master)
+            			{
+            				pluginRec = ((Master)pluginToSearch).getRecord(region);
+            			}
+        				if (pluginRec == null)
+        				{
+        			        if (Main.debugMode)
+        			        {
+        			            System.out.print("MergeTask: Region " + String.format("%08X", region)
+        			            		       + " not found in plugin " + pluginName + "\n");
+        			        }
+        			        continue;
+        				}
+        				regionName = pluginRec.getEditorID();
+        				try
+        				{
+        					PluginSubrecord WSRec = pluginRec.getSubrecord("WNAM");
+        					String WSStr = WSRec.getDisplayData();
+        					worldspaceID = Integer.parseInt(WSStr, 16);
+        				}
+        				catch (Exception ex) // Possible for a region not to have a WNAM.
+        				{
+        			        if (Main.debugMode)
+        			        {
+        			            System.out.print("MergeTask: WNAM not found for region " + String.format("%08X", region)
+        			            		       + " in plugin " + pluginName + "\n");
+        			        }
+        				}
+        				// If we've gotten this far, only one more piece of info to get: the worldspace name.
+        				// Unfortunately, we get to repeat a lot of what was done for the region.
+        				// Check for the easy and usual case first
+        				int WSIndex = (worldspaceID == -1) ? worldspaceID : worldspaceID >>> 24;
+        				String WSPluginName = "";
+        				if (WSIndex != masterIdx // In a different plugin, so must search for it.
+        					&& WSIndex != -1) // Worldspace was found
+        				{
+                			if (WSIndex == pluginMasterList.size()) // The plugin itself
+                			{
+                				pluginToSearch = plugins[1];
+                				WSPluginName = plugins[1].getName();
+                			}
+                			else
+                			{
+                				WSPluginName = pluginMasterList.get(WSIndex);
+                				int mergedMasterIdx = mergedMasterList.indexOf(WSPluginName);
+                				if (mergedMasterIdx != -1)
+                				{
+                					pluginToSearch = masters[mergedMasterIdx];
+                				}
+                				else if (WSPluginName.equalsIgnoreCase(plugins[0].getName()))
+                					// Must be the master to be merged to.
+                				{
+                					pluginToSearch = plugins[0];
+                				}
+                				else // Something is wrong...
+                				{
+                			        if (Main.debugMode)
+                			        {
+                			            System.out.print("MergeTask: Plugin " + WSPluginName + " for worldspace "
+                			            		+ String.format("%08X", worldspaceID) + " not found in merge list\n");
+                			        }
+                			        continue;
+                				}
+                			}
+        				}
+        				else if (WSIndex == masterIdx) // Look in same place as for the region.
+        				{
+        					WSPluginName = pluginName;
+        				}
+        				if (WSIndex == -1) // Worldspace not found
+        				{
+        					pluginToSearch = new String(); 
+        					// A bit of trickery to bypass the instanceof conditions below. A check of
+        					// WSIndex is still needed in the debug statement.
+        				}
+            			FormInfo WSFormInfo = null;
+            			if (pluginToSearch instanceof Plugin)
+            			{
+            				WSFormInfo = ((Plugin)pluginToSearch).getFormMap().get(worldspaceID);
+            			}
+            			else if (pluginToSearch instanceof Master)
+            			{
+            				WSFormInfo = ((Master)pluginToSearch).getFormMap().get(worldspaceID);
+            			}
+        				if (WSFormInfo == null && WSIndex != -1)
+        				{
+        			        if (Main.debugMode)
+        			        {
+        			            System.out.print("MergeTask: Worldspace " + String.format("%08X", worldspaceID)
+        			            		       + " not found in plugin " + WSPluginName + "\n");
+        			        }
+        			        continue;
+        				}
+        				if (WSFormInfo != null)
+        					worldspaceName = WSFormInfo.getEditorID();
+        				// Now fill in the region info.
+                		String[] regionInfoArray = new String[4];
+        				regionInfoArray[0] = String.format("%08X", region);
+        				regionInfoArray[1] = pluginName;
+        				regionInfoArray[2] = worldspaceName;
+        				regionInfoArray[3] = regionName;
+        				regionData.add(regionInfoArray);
+        			} 
+                	String retStr = RegionCellDialog.showDialog(parentWindow, regionData);
+                    if (Main.debugMode)
+                    {
+                        System.out.print("Returned from RegionCellDialog: " + retStr + "\n");
+                    }
+                    // Now parse the result and set ignore accordingly.
+                    String[] resultArray = retStr.split(RegionCellDialog.Separator);
+                    // For ALL, do nothing.
+                    if (resultArray[0].equals(RegionCellDialog.All)) ;;
+                    if (resultArray[0].equals(RegionCellDialog.None)) plugins[1].ignoreAllExteriorCells();
+                    if (resultArray[0].equals(RegionCellDialog.CancelMerge)) throw new InterruptedException("Merge canceled");
+                    if (resultArray[0].equals(RegionCellDialog.Some))
+                    {
+                    	ArrayList<Integer> regionIDs = new ArrayList<Integer>();
+                    	for (int j = 1; j < resultArray.length; j++) // Skipping first array member
+                    	{
+                    		int regionID = Integer.parseInt(resultArray[j], 16);
+                    		regionIDs.add(regionID);
+                    	}
+                    	plugins[1].ignoreAllExteriorCellsExcept(regionIDs);                    	
+                    }
+                    if (resultArray[0].equals(RegionCellDialog.Except))
+                    {
+                    	ArrayList<Integer> regionIDs = new ArrayList<Integer>();
+                    	for (int j = 1; j < resultArray.length; j++) // Skipping first array member
+                    	{
+                    		int regionID = Integer.parseInt(resultArray[j], 16);
+                    		regionIDs.add(regionID);
+                    	}
+                    	plugins[1].ignoreAllExteriorCells(regionIDs);                    	
+                    }
+            	}
+            } // End of mind-numbingly long "exclude exterior cells" block
+            
+            // Now check to see if a "floor" form ID is to be used. Cancelling or negating the 
+            // initial popup does the merge the usual way; cancelling or merging the succeeding
+            // form ID popup cancels the merge. Also only when the user wishes to manage the merge.
+            if (masterMerge && manageMerge)
+            {
+	            int selection2 = JOptionPane.showConfirmDialog(parentWindow, 
+	                    "Do you wish to select a starting start form ID to new objects merged into the master?\n" +
+	                    "<html>Selecting <i>No</i> or destroying this window will continue the merge as normal.</html>",
+	                    "Select Starting Form ID", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+	            if (selection2 == JOptionPane.YES_OPTION)
+	            {
+	            	useFloorFormID = true;
+	            	floorFormID = getStartFormID(highestFormID(plugins[0]));
+	            	if (floorFormID == -1)
+	            	{
+	            		useFloorFormID = false;
+	                    throw new InterruptedException("Merge canceled");
+	            	}
+	            	floorFormID++;
+	            }
+	            else useFloorFormID = false;
+
+            }
+
+            //
+            // Create the merged form ID and editor ID maps
+            //
+            for (i=0, count=0; i<plugins.length; i++)
+                count += plugins[i].getFormList().size();
+
+            mergedFormMap = new HashMap<Integer, FormInfo>(count);
+            mergedEditorMap = new HashMap<String, FormInfo>(count);
+            highFormID = (mergedMasterCount<<24);
+
+            //
+            // Map the records for each plugin
+            //
+            for (i=0; i<plugins.length; i++) {
+                mapPluginRecords(plugins[i]);
+                if (interrupted())
+                    throw new InterruptedException("Merge canceled");
+            }
+
+            //
+            // Update references for each plugin
+            //
+            for (i=0; i<plugins.length; i++) {
+                getStatusDialog().updateMessage("Updating references for "+pluginNames[i]);
+                plugin = plugins[i];
+
+                //
+                // Build the mapping from the plugin master list to the
+                // merged master list
+                //
+                List<String> masterList = plugin.getMasterList();
+                int[] masterMap = new int[masterList.size()];
+                for (int index=0; index<masterMap.length; index++) {
+                    String masterName = masterList.get(index);
+                    int mergedIndex = mergedMasterList.indexOf(masterName);
+                    masterMap[index] = (mergedIndex>=0 ? mergedIndex : mergedMasterCount);
+                }
+
+                Map<Integer, FormInfo> formMap = plugin.getFormMap();
+                FormAdjust formAdjust = new FormAdjust(masterMap, mergedMasterCount, formMap);
+
+                //
+                // Update each top-level group in the plugin
+                //
+                List<PluginGroup> groupList = plugin.getGroupList();
+                int groupCount = groupList.size();
+                int processedCount = 0;
+                int currentProgress = 0;
+                for (PluginGroup group : groupList) {
+                    updateGroup(group, formAdjust);
+                    if (interrupted())
+                        throw new InterruptedException("Merge canceled");
+                    
+                    processedCount++;
+                    int newProgress = (processedCount*100)/groupCount;
+                    if (newProgress >= currentProgress+5) {
+                        currentProgress = newProgress;
+                        getStatusDialog().updateProgress(currentProgress);
+                    }
+                }
+            }
+
+            //
+            // Create the merged plugin
+            //
+            File mergedFile;
+            if (masterMerge) {
+                plugin = plugins[0];
+                mergedFile = new File(Main.pluginDirectory+Main.fileSeparator+plugin.getName());
+                mergedPlugin = new Plugin(mergedFile, plugin.getCreator(), plugin.getSummary(), mergedMasterList);
+                mergedPlugin.setVersion(version);
+                mergedPlugin.setMaster(true);
+            } else {
+                mergedFile = new File(Main.pluginDirectory+Main.fileSeparator+pluginInfo.getName());
+                mergedPlugin = new Plugin(mergedFile, pluginInfo.getCreator(), pluginInfo.getSummary(), mergedMasterList);
+                mergedPlugin.setVersion(version);
+                mergedPlugin.setMaster(false);
+            }
+
+            mergedPlugin.createInitialGroups();
+            
+            // Before merging, build the deleted INFO map.
+            // INFO fields form a special case. If specifically deleted in a plugin that is 
+            // merged to the plugin where originally defined, the PNAM fields must be 
+            // "sutured" where that INFO is removed. To do that, copies of all specifically 
+            // deleted records are collected into a map BEFORE ignored records are removed, 
+            // since deleted records are ignored as well. Although a list of deleted records
+            // can be done for any group, right now it only makes sense for the DIAL group,
+            // which is where the INFOs live.
+            Map<Integer, List<PluginRecord>> deletedINFOMap = new HashMap<Integer, List<PluginRecord>>();
+            for (i = plugins.length - 1; i >= 0; i--)
+            {
+            	buildDeletedINFOMap(plugins[i], deletedINFOMap);
+            }
+            
+            //
+            // Merge the plugins
+            //
+            for (i=0; i<plugins.length; i++) {
+                getStatusDialog().updateMessage("Merging "+pluginNames[i]);
+                mergePlugin(plugins[i]);
+            }
+            
+            // After all merging, if necessary suture the PNAM chains.
+            if (!deletedINFOMap.isEmpty())
+            {
+            	PluginGroup mergedGroup = mergedPlugin.getTopGroup("DIAL");
+            	if (mergedGroup != null) mergedGroup.suturePNAMs(deletedINFOMap);
+            }
+
+
+            //
+            // Write the merged plugin file
+            //
+            mergedPlugin.store(this);
+
+            //
+            // Delete existing voice files for the merged plugin unless the merged plugin 
+            // is also one of the input plugins. We never want to delete existing voice files 
+            // if we are doing a merge to master.
+            //
+            getStatusDialog().updateMessage("Merging voice files");
+            String mergedPath = String.format("%s%sSound%sVoice%s%s", mergedFile.getParent(), Main.fileSeparator,
+                                              Main.fileSeparator, Main.fileSeparator, mergedFile.getName());
+            if (!masterMerge) {
+                String mergedName = mergedPlugin.getName();
+                boolean deleteFiles = true;
+                for (i=0; i<pluginNames.length; i++) {
+                    if (mergedName.equalsIgnoreCase(pluginNames[i])) {
+                        deleteFiles = false;
+                        break;
+                    }
+                }
+
+                if (deleteFiles) {
+                    File voiceDirectory = new File(mergedPath);
+                    if (voiceDirectory.exists())
+                        if (voiceDirectory.isDirectory())
+                            deleteDirectoryTree(voiceDirectory);
+                        else
+                            voiceDirectory.delete();
+                }
+            }
+
+            //
+            // Merge the voice files from each plugin. Don't merge existing
+            // voice files for the merged plugin.
+            //
+            for (i=0; i<plugins.length; i++) {
+                plugin = plugins[i];
+                if (!mergedPlugin.getName().equalsIgnoreCase(plugin.getName())) {
+                    String voicePath = String.format("%s%sSound%sVoice%s%s", 
+                                                     mergedFile.getParent(), Main.fileSeparator, Main.fileSeparator, 
+                                                     Main.fileSeparator, plugin.getName());
+                    File voiceDirectory = new File(voicePath);
+                    if (voiceDirectory.exists() && voiceDirectory.isDirectory())
+                        copyVoiceFiles(plugin, voiceDirectory, mergedPath);
+                }
+            }
+            
+            completed = true;
+        } catch (PluginException exc) {
+            Main.logException("Plugin Error", exc);
+        } catch (DataFormatException exc) {
+            Main.logException("Compression Error", exc);
+        } catch (IOException exc) {
+            Main.logException("I/O Error", exc);
+        } catch (InterruptedException exc) {
+            WorkerDialog.showMessageDialog(getStatusDialog(), "Request canceled", "Interrupted", JOptionPane.ERROR_MESSAGE);
+        } catch (Throwable exc) {
+            Main.logException("Exception while merging plugins", exc);
+        }
+
+        //
+        // All done, but zero out the form lists for all plugins and masters involved to reduce loitering.
+        //
+        mergedPlugin.resetFormList();
+        mergedPlugin.resetFormMap();
+        for (i=0; i<plugins.length; i++) plugins[i].resetFormList();
+        for (i=0; i<masters.length; i++) masters[i].resetFormList();
+        for (i=0; i<plugins.length; i++) plugins[i].resetFormMap();
+        for (i=0; i<masters.length; i++) masters[i].resetFormMap();
+        getStatusDialog().closeDialog(completed);
+    }
+
+    /**
+     * Map the plugin records
+     *
+     * @param       plugin                  The plugin to be mapped
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mapPluginRecords(Plugin plugin) throws DataFormatException, IOException, PluginException {
+        List<FormInfo> formList = plugin.getFormList();
+        List<String> masterList = plugin.getMasterList();
+        String pluginName = plugin.getName();
+        int masterCount = masterList.size();
+
+        //
+        // Process each record in the plugin
+        //
+        
+        for (FormInfo info : formList) {
+            String text, recordType;
+            PluginRecord record, mergedRecord;
+            FormInfo mergedInfo;
+            int formID = info.getFormID();
+            String editorID = info.getEditorID();
+            int masterID = formID>>>24;
+            formID &= 0x00ffffff;
+            boolean masterReference = false;
+            boolean updateMap = true;
+            
+            // If record is ignored, it is neither mapped nor used.
+            if (((PluginRecord)info.getSource()).isIgnored()) continue;
+
+
+            //
+            // We don't have a master reference if we are merging a plugin into
+            // a master and the reference is to the merge master. Otherwise,
+            // the master ID is changed to reflect the position of the master
+            // within the merged master list.
+            //
+            if (masterID < masterCount) {
+                String masterName = masterList.get(masterID);
+                if (!masterMerge || !masterName.equals(pluginNames[0])) {
+                    masterReference = true;
+                    masterID = mergedMasterList.indexOf(masterName);
+                }
+            }
+
+            if (masterReference) {
+
+                //
+                // Process a modification to an object defined in a master file.  We
+                // will ignore a record if it is identical to the current merged record.
+                // However, WRLD, CELL and DIAL records cannot be ignored since they have
+                // associated subgroups that need to be processed during the merge phase.
+                //
+                formID |= (masterID<<24);
+                mergedInfo = mergedFormMap.get(new Integer(formID));
+                if (mergedInfo != null) {
+                    updateMap = false;
+                    record = (PluginRecord)info.getSource();
+                    mergedRecord = (PluginRecord)mergedInfo.getSource();
+                    if (record.isIdentical(mergedRecord)) {
+                        recordType = record.getRecordType();
+                        if (!recordType.equals("WRLD") && !recordType.equals("CELL") && !recordType.equals("DIAL"))
+                            record.setIgnore(true);
+                    } else if (!record.isDeleted() && editorID.length() != 0) {
+                        if (!mergedInfo.getMergedEditorID().equals(editorID)) {
+                            text = String.format("Plugin %s changes merged master record editor ID from %s to %s",
+                                                 plugin.getName(), mergedInfo.getMergedEditorID(), editorID);
+                            throw new PluginException(text);
+                        }
+                    }
+                }
+
+            } else {
+
+                //
+                // Process a plugin item. The Form ID needs to be adjusted to be
+                // the first file following the merged master list.
+                //
+                formID |= (mergedMasterCount<<24);
+
+                //
+                // Check for a Form ID collision. If we are merging a plugin into
+                // a master, then the plugin record replaces the master record.
+                // Otherwise, the second record gets a new Form ID assigned.
+                //
+                mergedInfo = mergedFormMap.get(new Integer(formID));
+                if (mergedInfo != null) {
+                    if (masterMerge && masterID < masterCount) {
+                        record = (PluginRecord)info.getSource();
+                        recordType = record.getRecordType();
+                        if (!recordType.equals("WRLD") && !recordType.equals("CELL") && !recordType.equals("DIAL")) {
+                            mergedRecord = (PluginRecord)mergedInfo.getSource();
+                            mergedFormMap.remove(new Integer(formID));
+                            mergedEditorMap.remove(mergedInfo.getMergedEditorID().toLowerCase());
+                            mergedRecord.setIgnore(true);
+                            if (record.isDeleted()) {
+                                record.setIgnore(true);
+                                updateMap = false;
+                            }
+                        } else {
+                            updateMap = false;
+                            if (!record.isDeleted() && editorID.length() != 0) {
+                                if (!mergedInfo.getMergedEditorID().equals(editorID)) {
+                                    mergedInfo.setMergedEditorID(editorID);
+                                    mergedEditorMap.put(editorID.toLowerCase(), info);
+                                }
+                            }
+                            else if (record.isDeleted())
+                            {
+                            	// As above, ignore both records. Hopefully the auto-removal of ignored records will do the rest.
+                                mergedRecord = (PluginRecord)mergedInfo.getSource();
+                                mergedRecord.setIgnore(true);
+                            	record.setIgnore(true);
+                            }
+
+                        }
+                    }
+                    else if (masterMerge && useFloorFormID && !plugin.isMaster())// Where the base form ID stuff will go.
+                    {
+                    	formID = floorFormID++;
+                    }
+                    else
+                    	formID = highFormID+1;
+                }
+                else if (masterMerge && useFloorFormID && !plugin.isMaster())// Where the base form ID stuff will go.
+                {
+                	formID = floorFormID++;
+                }
+
+
+                //
+                // Check for an Editor ID collision. Delete the record if it
+                // is a duplicate of the existing record. Otherwise, assign
+                // a new Editor ID to the conflicting record.
+                //
+                // GMST and MGEF records are a special case since they are merged based
+                // on the editor ID and not on the form ID.  We will use the form ID
+                // from the first GMST/MGEF record for all other GMST/MGEF records with the
+                // same editor ID.
+                //
+                if (updateMap && editorID.length() != 0) {
+                    mergedInfo = mergedEditorMap.get(editorID.toLowerCase());
+                    if (mergedInfo != null) {
+                        record = (PluginRecord)info.getSource();
+                        mergedRecord = (PluginRecord)mergedInfo.getSource();
+                        recordType = record.getRecordType();
+                        if (record.isIdentical(mergedRecord)) {
+                            record.setIgnore(true);
+                            formID = mergedInfo.getMergedFormID();
+                            updateMap = false;
+                        } else if (recordType.equals("GMST")) {
+                            if (!mergedRecord.getRecordType().equals("GMST")) {
+                                text = String.format("Conflict between GMST record %s (%08X) in plugin %s"+
+                                                     " and %s record %s (%08X) in plugin %s",
+                                                     editorID, record.getFormID(), pluginName, 
+                                                     mergedRecord.getRecordType(), editorID, mergedRecord.getFormID(),
+                                                     ((Plugin)mergedInfo.getPlugin()).getName());
+                                throw new PluginException(text);
+                            }
+                            
+                            formID = mergedInfo.getMergedFormID();
+                            updateMap = false;
+                        } else if (recordType.equals("MGEF")) {
+                            if (!mergedRecord.getRecordType().equals("MGEF")) {
+                                text = String.format("Conflict between MGEF record %s (%08X) in plugin %s"+
+                                                     " and %s record %s (%08X) in plugin %s",
+                                                     editorID, record.getFormID(), pluginName, 
+                                                     mergedRecord.getRecordType(), editorID, mergedRecord.getFormID(),
+                                                     ((Plugin)mergedInfo.getPlugin()).getName());
+                                throw new PluginException(text);
+                            }
+                            
+                            formID = mergedInfo.getMergedFormID();
+                            updateMap = false;
+                        } else {
+                            String newEditorID = editorID.concat("X");
+                            while (mergedEditorMap.get(newEditorID.toLowerCase()) != null)
+                                newEditorID = newEditorID.concat("X");
+
+                            if (!yesToAll) {
+                                text = String.format("%s record %s (%08X) in '%s' has the same name as %s record %s (%08X) in '%s'", 
+                                                     info.getRecordType(), editorID, record.getFormID(), pluginName, 
+                                                     mergedInfo.getRecordType(), editorID, mergedRecord.getFormID(),
+                                                     ((Plugin)mergedInfo.getPlugin()).getName());
+                                int selection = WorkerDialog.showConfirmDialog(getParent(), 
+                                                    text+". Do you want to rename it to "+newEditorID+"?", 
+                                                    "Error", JOptionPane.YES_NO_OPTION, JOptionPane.ERROR_MESSAGE, true);
+                                if (selection == WorkerDialog.NO_OPTION)
+                                    throw new PluginException(text);
+
+                                if (selection == WorkerDialog.YES_TO_ALL_OPTION)
+                                    yesToAll = true;
+                            }
+
+                            editorID = newEditorID;
+                        }
+                    }
+                }
+            }
+
+            //
+            // Set the merged Form ID and Editor ID
+            //
+            info.setMergedFormID(formID);
+            info.setMergedEditorID(editorID);
+
+            //
+            // Update the mappings
+            //
+            if (updateMap) {
+                mergedFormMap.put(new Integer(formID), info);
+                if (editorID.length() != 0)
+                    mergedEditorMap.put(editorID.toLowerCase(), info);
+            }
+
+            //
+            // Update the highest Form ID encountered so far
+            //
+            if (formID > highFormID)
+                highFormID = formID;
+        }
+    }
+
+    /**
+     * Update all references for a group
+     *
+     * @param       group                   The group to be updated
+     * @param       formAdjust              The form adjustment
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void updateGroup(PluginGroup group, FormAdjust formAdjust) 
+                                            throws DataFormatException, IOException, PluginException {
+
+        //
+        // Update the group label if it contains a Form ID
+        //
+        int groupType = group.getGroupType();
+        if (groupType == PluginGroup.WORLDSPACE || groupType == PluginGroup.CELL || 
+                                                   groupType == PluginGroup.CELL_PERSISTENT ||
+                                                   groupType == PluginGroup.CELL_TEMPORARY || 
+                                                   groupType == PluginGroup.CELL_DISTANT || 
+                                                   groupType == PluginGroup.TOPIC)
+            group.setGroupParentID(formAdjust.adjustFormID(group.getGroupParentID()));
+
+        //
+        // Update the group records
+        //
+        List<PluginRecord> recordList = group.getRecordList();
+        for (PluginRecord record : recordList) {
+            if (record instanceof PluginGroup)
+                updateGroup((PluginGroup)record, formAdjust);
+            else if (!record.isIgnored())
+                updateRecord(record, formAdjust);
+        }
+    }
+
+    /**
+     * Update all references for a record
+     *
+     * @param       record                  The record to be updated
+     * @param       formAdjust              The form adjustment
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void updateRecord(PluginRecord record, FormAdjust formAdjust) 
+                                            throws DataFormatException, IOException, PluginException {
+        String recordType = record.getRecordType();
+        int formID = record.getFormID();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Get the mapping for this record
+        //
+        FormInfo info = formAdjust.getFormMap().get(new Integer(formID));
+        if (info == null && formID != 0)
+            throw new PluginException(String.format("No mapping for %s record %s (%08X)", 
+                                      recordType, record.getEditorID(), formID));
+
+        //
+        // Update the subrecords
+        //
+        // The EDID subrecord is rewritten with the merged editor ID.
+        //
+        // Subrecord references are updated with the merged form ID values.
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("EDID")) {
+                if (info != null) {
+                    byte[] idString = info.getMergedEditorID().getBytes();
+                    byte[] subrecordData = new byte[idString.length+1];
+                    System.arraycopy(idString, 0, subrecordData, 0, idString.length);
+                    subrecordData[idString.length] = 0;
+                    subrecord.setSubrecordData(subrecordData);
+                }
+            } else {
+                int[][] references = subrecord.getReferences();
+                if (references != null) {
+                    byte[] subrecordData = subrecord.getSubrecordData();
+                    for (int i=0; i<references.length; i++) {
+                        int refOffset = references[i][0];
+                        int refFormID = references[i][1];
+                        if (refFormID != 0) {
+                            int mergedFormID = formAdjust.adjustFormID(refFormID);
+                            SerializedElement.setInteger(mergedFormID, subrecordData, refOffset);
+                        }
+                    }
+                    
+                    subrecord.setSubrecordData(subrecordData);
+                }
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        record.setSubrecords(subrecordList);
+
+        //
+        // Update the Form ID for the record (don't use the changeFormID() method here because
+        // we are iterating through all of the groups and will change the subgroup parent ID
+        // during the iteration)
+        //
+        if (info != null)
+            record.setFormID(info.getMergedFormID());
+    }
+
+    /**
+     * Merge the plugin records into the merged plugin
+     *
+     * @param       plugin                  The plugin to be merged
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergePlugin(Plugin plugin) throws DataFormatException, IOException, PluginException {
+        List<PluginGroup> mergedGroupList = mergedPlugin.getGroupList();
+        List<PluginGroup> groupList = plugin.getGroupList();
+
+        //
+        // We do not edit conflicts if we are merging to the master since
+        // the plugin definition overrides the master definition. Otherwise, 
+        // we will edit conflicts if requested by the user.
+        //
+        boolean editLeveledLists;
+        if (masterMerge)
+            editLeveledLists = false;
+        else
+            editLeveledLists = pluginInfo.shouldEditConflicts();
+
+        //
+        // Merge each group in the plugin. Records that are marked ignored
+        // and empty groups will not be copied to the merged plugin (however 
+        // empty groups are retained when they are associated with a record 
+        // that is not ignored).
+        //
+        for (PluginGroup group : groupList) {
+            String groupRecordType = group.getGroupRecordType();
+            group.removeIgnoredRecords();
+            boolean groupMerged = false;
+
+            //
+            // Locate the merged group that corresponds to the current top-level
+            // plugin group.  We should always find a match since the merge 
+            // process creates all of the top-level groups when it creates the 
+            // merged plugin.
+            //
+            for (PluginGroup mergedGroup : mergedGroupList) {
+                if (mergedGroup.getGroupRecordType().equals(groupRecordType)) {
+                    List<PluginRecord> recordList = group.getRecordList();
+                    List<PluginRecord> mergedRecordList = mergedGroup.getRecordList();
+
+                    //
+                    // Process each record in the top-level plugin group
+                    //
+                    for (PluginRecord record : recordList) {
+                        if (record instanceof PluginGroup) {
+
+                            //
+                            // For a group, we need to merge the subgroup
+                            // hierarchy
+                            //
+                            PluginGroup subgroup = (PluginGroup) record;
+                            int subgroupType = subgroup.getGroupType();
+                            byte[] subgroupLabel = subgroup.getGroupLabel();
+                            boolean subgroupMerged = false;
+                            for (PluginRecord mergedRecord : mergedRecordList) {
+                                if (mergedRecord instanceof PluginGroup) {
+                                    PluginGroup mergedSubgroup = (PluginGroup) mergedRecord;
+                                    if (mergedSubgroup.getGroupType() == subgroupType) {
+                                        byte[] mergedSubgroupLabel = mergedSubgroup.getGroupLabel();
+                                        if (mergedSubgroupLabel[0] == subgroupLabel[0] && 
+                                                        mergedSubgroupLabel[1] == subgroupLabel[1] && 
+                                                        mergedSubgroupLabel[2] == subgroupLabel[2] && 
+                                                        mergedSubgroupLabel[3] == subgroupLabel[3]) {
+                                            mergeGroup(mergedSubgroup, subgroup);
+                                            subgroupMerged = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            //
+                            // Copy the subgroup to the merged plugin if it doesn't already
+                            // exist. However, for an interior cell block, we need to traverse
+                            // the subgroup hierarchy since CELL records can move between
+                            // subgroups when the form ID is changed.
+                            //
+                            if (!subgroupMerged) {
+                                if (subgroupType == PluginGroup.INTERIOR_BLOCK) {
+                                    PluginGroup mergedSubgroup = new PluginGroup(subgroup.getGroupType(), subgroup.getGroupLabel());
+                                    mergedRecordList.add(mergedSubgroup);
+                                    mergedSubgroup.setParent(mergedGroup);
+                                    mergeGroup(mergedSubgroup, subgroup);
+                                } else {
+                                    mergedRecordList.add(record);
+                                    record.setParent(mergedGroup);
+                                }
+                            }
+
+                        } else {
+
+                            //
+                            // We will add the record to the merged plugin if the record
+                            // is not already present. If the merged plugin already contains
+                            // the record, we need to merge the plugin record with the merged
+                            // record.
+                            //
+                            String recordType = record.getRecordType();
+                            int index = mergedRecordList.indexOf(record);
+                            if (index < 0) {
+
+                                //
+                                // Add the record to the merged plugin
+                                //
+                                mergedRecordList.add(record);
+                                record.setParent(mergedGroup);
+
+                            } else if (!record.isDeleted()) {
+
+                                PluginRecord mergedRecord = mergedRecordList.get(index);
+                                if (recordType.equals("ACTI") || recordType.equals("AMMO") || 
+                                                                 recordType.equals("APPA") || 
+                                                                 recordType.equals("ARMO") ||
+                                                                 recordType.equals("BOOK") ||
+                                                                 recordType.equals("CLAS") || 
+                                                                 recordType.equals("CLOT") || 
+                                                                 recordType.equals("DOOR") || 
+                                                                 recordType.equals("EYES") || 
+                                                                 recordType.equals("HAIR") || 
+                                                                 recordType.equals("LIGH") || 
+                                                                 recordType.equals("MISC") || 
+                                                                 recordType.equals("SKIL") || 
+                                                                 recordType.equals("WEAP")) {
+
+                                    //
+                                    // Merge the subrecords (no special
+                                    // processing required)
+                                    //
+                                    mergeSubrecords(mergedRecord, record, null);
+
+                                } else if (recordType.equals("BSGN")) {
+
+                                    //
+                                    // Merge a birthsign
+                                    //
+                                    mergeBirthsign(mergedRecord, record);
+
+                                } else if (recordType.equals("CONT")) {
+
+                                    //
+                                    // Merge a container
+                                    //
+                                    mergeContainer(mergedRecord, record);
+
+                                } else if (recordType.equals("ALCH") || recordType.equals("ENCH") || 
+                                                                        recordType.equals("INGR") || 
+                                                                        recordType.equals("SPEL")) {
+
+                                    //
+                                    // Merge an enchantment, ingredient,
+                                    // potion or spell
+                                    //
+                                    mergeEnchantment(mergedRecord, record);
+
+                                } else if (recordType.equals("FACT")) {
+
+                                    //
+                                    // Merge a faction
+                                    //
+                                    mergeFaction(mergedRecord, record);
+
+                                } else if (recordType.equals("LVLC") || recordType.equals("LVLI") || 
+                                                                        recordType.equals("LVSP")) {
+
+                                    //
+                                    // For a leveled list, we need to either
+                                    // edit the leveled list
+                                    // or automatically merge the list items
+                                    //
+                                    if (editLeveledLists)
+                                        EditLeveledList.showWorkerDialog((JDialog) getParent(), mergedRecord, record, 
+                                                                         mergedFormMap, masters);
+                                    else
+                                        mergeLeveledList(mergedRecord, record);
+
+                                } else if (recordType.equals("NPC_") || recordType.equals("CREA")) {
+
+                                    //
+                                    // Merge an NPC or creature
+                                    //
+                                    mergeNPC(mergedRecord, record);
+
+                                } else if (recordType.equals("RACE")) {
+
+                                    //
+                                    // Merge a race
+                                    //
+                                    mergeRace(mergedRecord, record);
+
+                                } else if (recordType.equals("DIAL")) {
+
+                                    //
+                                    // Merge a race
+                                    //
+                                    mergeDialogTopic(mergedRecord, record);
+
+                                } else {
+
+                                    //
+                                    // We have a record conflict. Keep the first record unless
+                                    // this is a merge-to-master operation or the user has
+                                    // specified that the first conflict should be deleted.
+                                    //
+                                    if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                                        mergedRecordList.remove(index);
+                                        mergedRecordList.add(index, record);
+                                        record.setParent(mergedGroup);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    groupMerged = true;
+                    break;
+                }
+            }
+
+            if (!groupMerged)
+                throw new PluginException("Merge group "+groupRecordType+" not found");
+        }
+    }
+
+    /**
+     * Merge a group
+     *
+     * @param       mergedGroup             The merged group
+     * @param       group                   The plugin group
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeGroup(PluginGroup mergedGroup, PluginGroup group)
+                                            throws DataFormatException, IOException, PluginException {
+        List<PluginRecord> mergedRecordList = mergedGroup.getRecordList();
+        List<PluginRecord> recordList = group.getRecordList();
+
+        //
+        // Process each record in the plugin group
+        //
+        ListIterator<PluginRecord> lit = recordList.listIterator();
+        while (lit.hasNext()) {
+            PluginRecord record = lit.next();
+            String recordType = record.getRecordType();
+            if (record instanceof PluginGroup) {
+
+                //
+                // For a group, we need to merge the subgroup hierarchy
+                //
+                PluginGroup subgroup = (PluginGroup)record;
+                int subgroupType = subgroup.getGroupType();
+                byte[] subgroupLabel = subgroup.getGroupLabel();
+                boolean subgroupMerged = false;
+                int index = 0;
+                for (PluginRecord mergedRecord : mergedRecordList) {
+                    if (mergedRecord instanceof PluginGroup) {
+                        PluginGroup mergedSubgroup = (PluginGroup) mergedRecord;
+                        if (mergedSubgroup.getGroupType() == subgroupType) {
+                            byte[] mergedSubgroupLabel = mergedSubgroup.getGroupLabel();
+                            if (mergedSubgroupLabel[0] == subgroupLabel[0] && 
+                                                        mergedSubgroupLabel[1] == subgroupLabel[1] && 
+                                                        mergedSubgroupLabel[2] == subgroupLabel[2] && 
+                                                        mergedSubgroupLabel[3] == subgroupLabel[3]) {
+                                if (index > 0 && (subgroupType == PluginGroup.CELL_DISTANT || 
+                                                        subgroupType == PluginGroup.CELL_PERSISTENT)) {
+                                    //
+                                    // Earlier versions of TES4PU/TES4Gecko did not force CELL_DISTANT
+                                    // and CELL_PERSISTENT groups to be the first group in the parent
+                                    // record list.  So we will correct that problem now.
+                                    //
+                                    mergedRecordList.remove(index);
+                                    mergedRecordList.add(0, mergedSubgroup);
+                                }
+                                
+                                mergeGroup(mergedSubgroup, subgroup);
+                                subgroupMerged = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    index++;
+                }
+
+                //
+                // Copy the subgroup to the merged plugin if it doesn't already exist.
+                // However, for an interior cell subblock, we need to traverse the subgroup
+                // hierarchy since CELL records can move between subgroups when the form ID
+                // is changed.
+                //
+                // The distant cell children subgroup for an exterior cell must appear before 
+                // the temporary cell children subgroup.  So we will always insert it at the 
+                // beginning of the merged record list.
+                //
+                // The persistent cell children subgroup for an interior cell must appear before
+                // the temporary cell children subgroup.  So we will always insert it at the
+                // beginning of the merged record list.
+                //
+                // IMPORTANT UPDATE: Precise order DOES matter, and that order is:
+                // Persistent => VWD => Temporary
+                if (!subgroupMerged) 
+                {
+                    if (subgroupType == PluginGroup.INTERIOR_SUBBLOCK)
+                    {
+                        PluginGroup mergedSubgroup = new PluginGroup(subgroup.getGroupType(), subgroup.getGroupLabel());
+                        mergedRecordList.add(mergedSubgroup);
+                        mergedSubgroup.setParent(mergedGroup);
+                        mergeGroup(mergedSubgroup, subgroup);
+                    }
+                    else if (subgroupType == PluginGroup.CELL_DISTANT)
+                    {
+                    	if (mergedRecordList.size() > 0)
+                    	{
+                    		int insertIndex = 0;
+                    		PluginGroup firstGroup = (PluginGroup)mergedRecordList.get(0);
+                    		if (firstGroup.getGroupType() == PluginGroup.CELL_PERSISTENT)
+                    			insertIndex = 1; // VWD after persistent.
+                    		mergedRecordList.add(insertIndex, record);
+                    	}
+                    	else
+                    	{
+                            mergedRecordList.add(0, record);
+                    	}
+                        record.setParent(mergedGroup);
+                    }
+                    else if (subgroupType == PluginGroup.CELL_PERSISTENT) // Always first.
+                    {
+                        mergedRecordList.add(0, record);
+                        record.setParent(mergedGroup);
+                    }
+                    else
+                    {
+                        mergedRecordList.add(record);
+                        record.setParent(mergedGroup);
+                    }
+                }
+
+            } else if (recordType.equals("CELL") && 
+                            ((PluginGroup)record.getParent()).getGroupType() == PluginGroup.INTERIOR_SUBBLOCK) {
+
+                //
+                // The block/subblock for an interior cell is determined by the cell form ID.
+                // So we need to assign an interior cell to the correct block/subblock based
+                // on the merged form ID.
+                //
+                int index;
+                PluginGroup parentGroup;
+                List<PluginRecord> parentRecordList;
+                int formID = record.getFormID();
+                FormInfo formInfo = mergedFormMap.get(new Integer(formID));
+                PluginRecord mergedRecord = (PluginRecord)formInfo.getSource();
+                if (mergedRecord == record) {
+
+                    //
+                    // This is the first occurrence of the CELL record. So add it to the merged record
+                    // list based on the merged form ID for the cell.  The block/subblock values
+                    // are the reversed lower two decimal digits of the base form ID.
+                    //
+                    int baseFormID = formID&0x00ffffff;
+                    int block = baseFormID%10;
+                    int subblock = (baseFormID/10)%10;
+                    
+                    //
+                    // Locate the CELL top-level group
+                    //
+                    parentGroup = mergedPlugin.createTopGroup("CELL");
+                    parentRecordList = parentGroup.getRecordList();
+                    PluginGroup subgroup = null;
+                    
+                    //
+                    // Locate the block group for the new cell
+                    //
+                    boolean foundGroup = false;
+                    for (PluginRecord groupRecord : parentRecordList) {
+                        subgroup = (PluginGroup)groupRecord;
+                        if (SerializedElement.getInteger(subgroup.getGroupLabel(), 0) == block) {
+                            foundGroup = true;
+                            break;
+                        }
+                    }
+                    
+                    //
+                    // Create a new block group if we didn't find one
+                    //
+                    if (!foundGroup) {
+                        byte[] groupLabel = new byte[4];
+                        SerializedElement.setInteger(block, groupLabel, 0);
+                        subgroup = new PluginGroup(PluginGroup.INTERIOR_BLOCK, groupLabel);
+                        subgroup.setParent(parentGroup);
+                        parentRecordList.add(subgroup);
+                    }
+                    
+                    parentGroup = subgroup;
+                    parentRecordList = parentGroup.getRecordList();
+                    
+                    //
+                    // Locate the subblock group for the new cell
+                    //
+                    foundGroup = false;
+                    for (PluginRecord groupRecord : parentRecordList) {
+                        subgroup = (PluginGroup)groupRecord;
+                        if (SerializedElement.getInteger(subgroup.getGroupLabel(), 0) == subblock) {
+                            foundGroup = true;
+                            break;
+                        }
+                    }
+                    
+                    //
+                    // Create a new subblock group if we didn't find one
+                    //
+                    if (!foundGroup) {
+                        byte[] groupLabel = new byte[4];
+                        SerializedElement.setInteger(subblock, groupLabel, 0);
+                        subgroup = new PluginGroup(PluginGroup.INTERIOR_SUBBLOCK, groupLabel);
+                        subgroup.setParent(parentGroup);
+                        parentRecordList.add(subgroup);
+                    }
+                    
+                    parentGroup = subgroup;
+                    parentRecordList = parentGroup.getRecordList();
+                    
+                    //
+                    // Add the CELL record to the subblock group
+                    //
+                    index = parentRecordList.size();
+                    record.setParent(parentGroup);
+                    parentRecordList.add(record);
+                    
+                    //
+                    // Create an empty CELL group
+                    //
+                    subgroup = new PluginGroup(PluginGroup.CELL, formID);
+                    subgroup.setParent(parentGroup);
+                    parentRecordList.add(subgroup);
+
+                } else {
+
+                    //
+                    // The CELL is already defined in the merged plugin
+                    //
+                    parentGroup = (PluginGroup)mergedRecord.getParent();
+                    parentRecordList = parentGroup.getRecordList();
+                    index = parentRecordList.indexOf(record);
+                    if (!record.isDeleted()) {
+                        if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                            parentRecordList.remove(index);
+                            parentRecordList.add(index, record);
+                            record.setParent(parentGroup);
+                        }
+                    }
+                }
+
+                //
+                // Process the associated CELL subgroup using the merged group hierarchy
+                //
+                if (lit.hasNext()) {
+                    record = lit.next();
+                    index++;
+                    if ((record instanceof PluginGroup) && index < parentRecordList.size()) {
+                        mergedRecord = parentRecordList.get(index);
+                        if (mergedRecord instanceof PluginGroup) {
+                            PluginGroup subgroup = (PluginGroup) record;
+                            PluginGroup mergedSubgroup = (PluginGroup) mergedRecord;
+                            mergeGroup(mergedSubgroup, subgroup);
+                        } else {
+                            lit.previous();
+                        }
+                    } else {
+                        lit.previous();
+                    }
+                }
+
+            } else {
+
+                int index = mergedRecordList.indexOf(record);
+                if (index < 0) {
+
+                    //
+                    // Add the record to the merged plugin
+                    //
+                    if (recordType.equals("INFO"))
+                        addTopic(mergedRecordList, record);
+                    else
+                        mergedRecordList.add(record);
+                    
+                    record.setParent(mergedGroup);
+
+                } else if (!record.isDeleted()) {
+
+                    //
+                    // We have a record conflict. Keep the first record unless
+                    // this is a merge-to-master operation or the user has
+                    // specified that the first conflict should be deleted.
+                    //
+                    if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                        mergedRecordList.remove(index);
+                        if (recordType.equals("INFO"))
+                            addTopic(mergedRecordList, record);
+                        else
+                            mergedRecordList.add(index, record);
+                        
+                        record.setParent(mergedGroup);
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Add an INFO record to a dialog topic
+     *
+     * @param       recordList              The dialog group record list
+     * @param       record                  The info record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void addTopic(List<PluginRecord> recordList, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        
+        //
+        // Get the previous INFO record
+        //
+        List<PluginSubrecord> subrecords = record.getSubrecords();
+        int prevFormID = 0;
+        for (PluginSubrecord subrecord : subrecords) {
+            if (subrecord.getSubrecordType().equals("PNAM")) {
+                prevFormID = SerializedElement.getInteger(subrecord.getSubrecordData(), 0);
+                break;
+            }
+        }
+        
+        //
+        // The new record is inserted at the beginning of the dialog group if
+        // the previous form ID is zero.  The new record is inserted at the
+        // end of the group if the previous INFO record is not found.  Otherwise,
+        // the new record is inserted after the previous record and the chain
+        // pointer in the next record is updated.
+        //
+        if (prevFormID == 0) {
+            recordList.add(0, record);
+        } else {
+            ListIterator<PluginRecord> lit = recordList.listIterator();
+            boolean recordInserted = false;
+            while (lit.hasNext()) {
+                PluginRecord checkRecord = lit.next();
+                if (checkRecord.getFormID() == prevFormID) {
+                    lit.add(record);
+                    if (lit.hasNext()) {
+                        checkRecord = lit.next();
+                        subrecords = checkRecord.getSubrecords();
+                        for (PluginSubrecord subrecord : subrecords) {
+                            if (subrecord.getSubrecordType().equals("PNAM")) {
+                                byte[] subrecordData = subrecord.getSubrecordData();
+                                int checkFormID = SerializedElement.getInteger(subrecordData, 0);
+                                if (checkFormID == prevFormID) {
+                                    SerializedElement.setInteger(record.getFormID(), subrecordData, 0);
+                                    subrecord.setSubrecordData(subrecordData);
+                                    checkRecord.setSubrecords(subrecords);
+                                }
+                                
+                                break;
+                            }
+                        }
+                    }
+                    
+                    recordInserted = true;
+                    break;
+                }
+            }
+            
+            if (!recordInserted)
+                recordList.add(record);
+        }
+    }
+
+    /**
+     * Merge subrecords. There must be just one subrecord of a given type in
+     * the subrecord list. The entire subrecord will be replaced. Any
+     * subrecords in the exclusion list will not be processed. In addition,
+     * the FULL subrecord will be ignored if it follows an EFID subrecord.
+     *
+     * Special processing is required when merging model subrecords since
+     * they are followed by one or more dependendent records. The model
+     * subrecord (MODL/MOD2/MOD3/MOD4) will determine which model is merged.
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @param       exclusionList           Subrecord exclusion list or null if no exclusions
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeSubrecords(PluginRecord mergedRecord, PluginRecord record, String[] exclusionList) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+        boolean skipName = false;
+
+        //
+        // Get the subrecord lists
+        //
+        int formID = mergedRecord.getFormID();
+        int masterID = formID >>> 24;
+        if (masterID >= mergedMasterCount)
+            throw new PluginException("Merged master ID " + masterID + " is not valid");
+
+        Master master = masters[masterID];
+        PluginRecord masterRecord = master.getRecord(formID);
+        List<PluginSubrecord> masterSubrecordList = masterRecord.getSubrecords();
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Merge the attribute subrecords. We will skip any subrecords that are
+        // in the exclusion list. The EDID subrecord is always skipped as are
+        // dependent model subrecords (MODB/MO2B/MO3B/MO4B and MODT/MO2T/MO3T/MO4T).
+        //
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord subrecord = lit.next();
+            boolean foundSubrecord = false;
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("MODB") || subrecordType.equals("MODT") || 
+                                                subrecordType.equals("MO2B") || 
+                                                subrecordType.equals("MO2T") || 
+                                                subrecordType.equals("MO3B") || 
+                                                subrecordType.equals("MO3T") || 
+                                                subrecordType.equals("MO4B") || 
+                                                subrecordType.equals("MO4T"))
+                continue;
+
+            if (skipName && subrecordType.equals("FULL"))
+                continue;
+
+            if (subrecordType.equals("EFID"))
+                skipName = true;
+
+            if (exclusionList != null) {
+                boolean mergeSubrecord = true;
+                for (String exclusion : exclusionList) {
+                    if (exclusion.equals(subrecordType)) {
+                        mergeSubrecord = false;
+                        break;
+                    }
+                }
+
+                if (!mergeSubrecord)
+                    continue;
+            }
+
+            //
+            // Check each merged subrecord for the plugin record
+            //
+            ListIterator<PluginSubrecord> mlit = mergedSubrecordList.listIterator();
+            boolean skipMergedName = false;
+            while (mlit.hasNext()) {
+                PluginSubrecord mergedSubrecord = mlit.next();
+                if (mergedSubrecord.getSubrecordType().equals(subrecordType)) {
+                    if (skipMergedName && subrecordType.equals("FULL"))
+                        break;
+
+                    if (subrecordType.equals("EFID"))
+                        skipMergedName = true;
+
+                    foundSubrecord = true;
+                    boolean replaceSubrecord = false;
+                    if (!mergedSubrecord.equals(subrecord)) {
+                        int mergedIndex = masterSubrecordList.indexOf(mergedSubrecord);
+                        int index = masterSubrecordList.indexOf(subrecord);
+                        if (mergedIndex < 0) {
+
+                            //
+                            // The merged subrecord is not the same as the
+                            // master subrecord
+                            //
+                            if (index < 0) {
+
+                                //
+                                // We have a conflict since neither subrecord is the
+                                // same as the master subrecord
+                                //
+                                if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                                    replaceSubrecord = true;
+                            }
+
+                        } else {
+
+                            //
+                            // The merged subrecord is the same as the master subrecord
+                            // while the plugin subrecord is not the same.
+                            //
+                            replaceSubrecord = true;
+                        }
+                    }
+
+                    if (replaceSubrecord) {
+
+                        //
+                        // MODL can be followed by MODB and MODT
+                        // MOD2 can be followed by MO2B and MO2T
+                        // MOD3 can be followed by MO3B and MO3T
+                        // MOD4 can be followed by MO4B and MO4T
+                        //
+                        String modb = null;
+                        String modt = null;
+                        if (subrecordType.equals("MODL")) {
+                            modb = "MODB";
+                            modt = "MODT";
+                        } else if (subrecordType.equals("MOD2")) {
+                            modb = "MO2B";
+                            modt = "MO2T";
+                        } else if (subrecordType.equals("MOD3")) {
+                            modb = "MO3B";
+                            modt = "MO3T";
+                        } else if (subrecordType.equals("MOD4")) {
+                            modb = "MO4B";
+                            modt = "MO4T";
+                        }
+
+                        //
+                        // Replace the merged subrecord with the plugin
+                        // subrecord
+                        //
+                        mlit.set(subrecord);
+
+                        //
+                        // Replace the MODB/MO2B/MO3B/MO4B subrecord
+                        //
+                        if (modb != null && lit.hasNext()) {
+                            subrecord = lit.next();
+                            if (subrecord.getSubrecordType().equals(modb)) {
+                                if (mlit.hasNext()) {
+                                    mergedSubrecord = mlit.next();
+                                    if (mergedSubrecord.getSubrecordType().equals(modb)) {
+                                        mlit.set(subrecord);
+                                    } else {
+                                        mlit.previous();
+                                        mlit.add(subrecord);
+                                    }
+                                } else {
+                                    mlit.add(subrecord);
+                                }
+                            } else {
+                                lit.previous();
+                            }
+                        }
+
+                        //
+                        // Replace the MODT/MO2T/MO3T/MO4T subrecord
+                        //
+                        if (modt != null && lit.hasNext()) {
+                            subrecord = lit.next();
+                            if (subrecord.getSubrecordType().equals(modt)) {
+                                if (mlit.hasNext()) {
+                                    mergedSubrecord = mlit.next();
+                                    if (mergedSubrecord.getSubrecordType().equals(modt)) {
+                                        mlit.set(subrecord);
+                                    } else {
+                                        mlit.previous();
+                                        mlit.add(subrecord);
+                                    }
+                                } else {
+                                    mlit.add(subrecord);
+                                }
+                            } else {
+                                lit.previous();
+                            }
+                        }
+
+                        modifiedMergedList = true;
+                    }
+
+                    break;
+                }
+            }
+
+            //
+            // Add the subrecord if it is not already present in the merged record
+            //
+            if (!foundSubrecord) {
+
+                //
+                // MODL can be followed by MODB and MODT.
+                // MOD2 can be followed by MO2B and MO2T.
+                // MOD3 can be followed by MO3B and MO3T.
+                // MOD4 can be followed by MO4B and MO4T.
+                //
+                String modb = null;
+                String modt = null;
+                if (subrecordType.equals("MODL")) {
+                    modb = "MODB";
+                    modt = "MODT";
+                } else if (subrecordType.equals("MOD2")) {
+                    modb = "MO2B";
+                    modt = "MO2T";
+                } else if (subrecordType.equals("MOD3")) {
+                    modb = "MO3B";
+                    modt = "MO3T";
+                } else if (subrecordType.equals("MOD4")) {
+                    modb = "MO4B";
+                    modt = "MO4T";
+                }
+
+                //
+                // Add the subrecord. We always add the FULL subrecord as the second
+                // subrecord in the list to avoid potential conflicts with the script
+                // effect name subrecords.
+                //
+                if (subrecordType.equals("FULL"))
+                    mergedSubrecordList.add(1, subrecord);
+                else
+                    mergedSubrecordList.add(subrecord);
+
+                //
+                // Add the MODB/MO2B/MO3B/MO4B subrecord
+                //
+                if (modb != null && lit.hasNext()) {
+                    subrecord = lit.next();
+                    if (subrecord.getSubrecordType().equals(modb))
+                        mergedSubrecordList.add(subrecord);
+                    else
+                        lit.previous();
+                }
+
+                //
+                // Add the MODT/MO2T/MO3T/MO4T subrecord
+                //
+                if (modt != null && lit.hasNext()) {
+                    subrecord = lit.next();
+                    if (subrecord.getSubrecordType().equals(modt))
+                        mergedSubrecordList.add(subrecord);
+                    else
+                        lit.previous();
+                }
+
+                modifiedMergedList = true;
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge an array of references. Unique references from the plugin array
+     * will be added to the merged array. The array entry must contain the
+     * identifying value in the first 4 bytes (either a form ID or an index
+     * value).
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       entrySize               Size of each array entry
+     * @param       mergedSubrecordList     The merged subrecord list
+     * @param       subrecordList           The plugin subrecord list
+     * @return                              TRUE if the merged subrecord list was modified
+     * @exception   IOException             An I/O error occurred
+     */
+    private boolean mergeArray(String subrecordType, int entrySize, List<PluginSubrecord> mergedSubrecordList, 
+                               List<PluginSubrecord> subrecordList) throws IOException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Locate the plugin subrecord
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            if (!subrecord.getSubrecordType().equals(subrecordType))
+                continue;
+
+            boolean addSubrecord = true;
+            boolean replaceSubrecordData = false;
+            byte[] subrecordData = subrecord.getSubrecordData();
+
+            //
+            // Locate the merged subrecord
+            //
+            for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                if (!mergedSubrecord.getSubrecordType().equals(subrecordType))
+                    continue;
+
+                addSubrecord = false;
+                byte[] mergedSubrecordData = mergedSubrecord.getSubrecordData();
+
+                //
+                // Add unique references to the merged array
+                //
+                for (int offset=0; offset<subrecordData.length; offset+=entrySize) {
+                    boolean addReference = true;
+                    int reference = SerializedElement.getInteger(subrecordData, offset);
+                    for (int mergedOffset=0; mergedOffset<mergedSubrecordData.length; mergedOffset+=entrySize) {
+                        int mergedReference = SerializedElement.getInteger(mergedSubrecordData, mergedOffset);
+                        if (reference == mergedReference) {
+                            addReference = false;
+                            break;
+                        }
+                    }
+
+                    if (addReference) {
+                        int length = mergedSubrecordData.length;
+                        byte[] newSubrecordData = new byte[length + entrySize];
+                        System.arraycopy(mergedSubrecordData, 0, newSubrecordData, 0, length);
+                        System.arraycopy(subrecordData, offset, newSubrecordData, length, entrySize);
+                        mergedSubrecordData = newSubrecordData;
+                        replaceSubrecordData = true;
+                    }
+                }
+
+                if (replaceSubrecordData) {
+                    mergedSubrecord.setSubrecordData(mergedSubrecordData);
+                    modifiedMergedList = true;
+                }
+
+                break;
+            }
+
+            if (addSubrecord) {
+                mergedSubrecordList.add(subrecord);
+                modifiedMergedList = true;
+            }
+
+            break;
+        }
+
+        return modifiedMergedList = true;
+    }
+
+    /**
+     * Merge list items. Unique items from the plugin list will be added to
+     * the merged list. The subrecord must contain the identifying value in
+     * the first 4 bytes (either a form ID or an index value)
+     *
+     * @param       subrecordType           The subrecord type
+     * @param       mergedSubrecordList     The merged subrecord list
+     * @param       subrecordList           The plugin subrecord list
+     * @return                              TRUE if the merged subrecord list was modified
+     * @exception   IOException             An I/O error occurred
+     */
+    private boolean mergeList(String subrecordType, List<PluginSubrecord> mergedSubrecordList, 
+                              List<PluginSubrecord> subrecordList) throws IOException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Process each plugin subrecord
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            if (!subrecord.getSubrecordType().equals(subrecordType))
+                continue;
+
+            byte[] subrecordData = subrecord.getSubrecordData();
+            int subrecordID = SerializedElement.getInteger(subrecordData, 0);
+            boolean insertSubrecord = true;
+            boolean foundSubrecord = false;
+            int index = 0;
+
+            //
+            // Check the merged subrecords for a matching value
+            //
+            for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                if (mergedSubrecord.getSubrecordType().equals(subrecordType)) {
+                    foundSubrecord = true;
+                    subrecordData = mergedSubrecord.getSubrecordData();
+                    int mergedSubrecordID = SerializedElement.getInteger(subrecordData, 0);
+                    if (subrecordID == mergedSubrecordID) {
+                        insertSubrecord = false;
+                        break;
+                    }
+                } else if (foundSubrecord) {
+                    break;
+                }
+
+                index++;
+            }
+
+            if (insertSubrecord) {
+                mergedSubrecordList.add(index, subrecord);
+                modifiedMergedList = true;
+            }
+        }
+
+        return modifiedMergedList;
+    }
+
+    /**
+     * Merge a birthsign
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeBirthsign(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Merge the attribute subrecords. The SPLO subrecords will be
+        // processed later.
+        //
+        String[] exclusionList = { "SPLO" };
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Update the birthsign spells
+        //
+        if (mergeList("SPLO", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge a dialog topic
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeDialogTopic(PluginRecord mergedRecord, PluginRecord record) 
+    throws DataFormatException, IOException, PluginException
+    {
+        boolean modifiedMergedList = false;
+
+        //
+        // Get the subrecord lists
+        //
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        // 
+        // Since DIALs are not stored in masters, we have to do the grunt work here.
+        // Luckily, there's not too much. Just set the non-QSTI fields (EDID & FULL)
+        // to either the merged or plugin value depending on the shouldDeleteLastConflict()
+        // value, and then add the new QSTI records to the megred record.
+        if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) // Use plugin values; always overwrite for master merge
+        {
+        	String oldEDID = mergedRecord.getEditorID(); 
+        	String newEDID = record.getEditorID(); 
+        	if (!oldEDID.equals(newEDID))
+        	{
+        		modifiedMergedList = true;
+            	mergedRecord.setEditorID(record.getEditorID());
+        	}
+        	PluginSubrecord oldSubFULL = mergedRecord.getSubrecord("FULL");
+        	PluginSubrecord newSubFULL = record.getSubrecord("FULL");
+        	if (!oldSubFULL.equals(newSubFULL))
+        	{
+        		modifiedMergedList = true;
+            	mergedRecord.changeSubrecord("FULL", oldSubFULL, newSubFULL);
+        	}
+        }
+
+        //
+        // Update the quest references
+        //
+        if (mergeList("QSTI", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge a container
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeContainer(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Merge the attribute subrecords. The CNTO subrecords will be
+        // processed later.
+        //
+        String[] exclusionList = { "CNTO" };
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Update the container contents
+        //
+        if (mergeList("CNTO", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge an enchantment, ingredient, potion or spell
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeEnchantment(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        String recordType = record.getRecordType();
+        boolean modifiedMergedList = false;
+        int pluginField1 = 0, pluginField2 = 0;
+        boolean autoCalculate = true;
+
+        //
+        // Merge the attribute subrecords. The EFID, EFIT, ENIT, SCIT and SPIT subrecords
+        // will be processed later. The FULL subrecords that are part of a script effect
+        // will also be processed later.
+        //
+        String[] exclusionList = { "EFID", "EFIT", "ENIT", "SCIT", "SPIT" };
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Add new effects to the merged enchantment (ENIT, EFID, EFIT, SCIT and FULL subrecords)
+        //
+        // EFID subrecord
+        // Bytes 0-3: Effect name
+        //
+        // EFIT subrecord
+        // Bytes 0-3: Effect name
+        // Bytes 4-7: Magnitude (integer)
+        // Bytes 8-11: Area (integer)
+        // Bytes 12-15: Duration (integer)
+        // Bytes 16-19: Effect subtype
+        //
+        // ENIT subrecord (ENCH record)
+        // Bytes 0-3: Enchantment type
+        // Bytes 4-7: Charge (integer)
+        // Bytes 8-11: Cost (integer)
+        // Byte 12: Flags (1=Manual calculate)
+        // Bytes 13-15: Unknown
+        //
+        // ENIT subrecord (ALCH or INGR record)
+        // Bytes 0-3: Value
+        // Byte 4: Flags (1=Manual calculate)
+        // Bytes 5-7: Unknown
+        //
+        // SCIT subrecord
+        // Bytes 0-3: Script form ID
+        // Bytes 4-7: Magic school
+        // Bytes 8-11: Effect name
+        // Bytes 12: Flags
+        // Bytes 13-15: Unknown
+        //
+        // SPIT subrecord (SPEL record)
+        // Bytes 0-3: Spell type
+        // Bytes 4-7: Cost (integer)
+        // Bytes 8-11: Skill level (integer)
+        // Byte 12: Flags (1=Manual calculate)
+        // Bytes 13-15: Unknown
+        //
+        ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+        while (lit.hasNext()) {
+            PluginSubrecord subrecord = lit.next();
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("ENIT")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (recordType.equals("ALCH") || recordType.equals("INGR")) {
+                    pluginField1 = SerializedElement.getInteger(subrecordData, 0);
+                    if ((subrecordData[4] & 1) != 0)
+                        autoCalculate = false;
+                } else {
+                    pluginField1 = SerializedElement.getInteger(subrecordData, 4);
+                    pluginField2 = SerializedElement.getInteger(subrecordData, 8);
+                    if ((subrecordData[12] & 1) != 0)
+                        autoCalculate = false;
+                }
+            } else if (subrecordType.equals("SPIT")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                pluginField1 = SerializedElement.getInteger(subrecordData, 4);
+                pluginField2 = SerializedElement.getInteger(subrecordData, 8);
+                if ((subrecordData[12] & 1) != 0)
+                    autoCalculate = false;
+            } else if (subrecordType.equals("EFIT")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                boolean addEffect = true;
+                String effectName = new String(subrecordData, 0, 4);
+                int effectSubtype = 0;
+                int scriptID = 0;
+                PluginSubrecord scitSubrecord = null;
+                PluginSubrecord fullSubrecord = null;
+                if (effectName.equals("DGAT") || effectName.equals("DRAT") || 
+                                                 effectName.equals("DRSK") || 
+                                                 effectName.equals("FOAT") || 
+                                                 effectName.equals("FOSK") || 
+                                                 effectName.equals("REAT") || 
+                                                 effectName.equals("ABAT") || 
+                                                 effectName.equals("ABSK"))
+                    effectSubtype = SerializedElement.getInteger(subrecordData, 20);
+
+                if (effectName.equals("SEFF")) {
+                    if (lit.hasNext()) {
+                        scitSubrecord = lit.next();
+                        if (scitSubrecord.getSubrecordType().equals("SCIT")) {
+                            byte[] scitSubrecordData = scitSubrecord.getSubrecordData();
+                            scriptID = SerializedElement.getInteger(scitSubrecordData, 0);
+                            if (lit.hasNext()) {
+                                fullSubrecord = lit.next();
+                                if (!fullSubrecord.getSubrecordType().equals("FULL")) {
+                                    lit.previous();
+                                    fullSubrecord = null;
+                                }
+                            }
+                        } else {
+                            scitSubrecord = null;
+                        }
+                    }
+
+                    if (scitSubrecord == null)
+                        throw new PluginException("SCIT subrecord missing for script effect");
+                }
+
+                ListIterator<PluginSubrecord> mlit = mergedSubrecordList.listIterator();
+                while (mlit.hasNext()) {
+                    PluginSubrecord mergedSubrecord = mlit.next();
+                    if (mergedSubrecord.getSubrecordType().equals("EFIT")) {
+                        byte[] mergedSubrecordData = mergedSubrecord.getSubrecordData();
+                        String mergedEffectName = new String(mergedSubrecordData, 0, 4);
+                        int mergedEffectSubtype = 0;
+                        if (mergedEffectName.equals(effectName)) {
+                            if (mergedEffectName.equals("DGAT") || mergedEffectName.equals("DRAT") || 
+                                                                   mergedEffectName.equals("DRSK") || 
+                                                                   mergedEffectName.equals("FOAT") || 
+                                                                   mergedEffectName.equals("FOSK") || 
+                                                                   mergedEffectName.equals("REAT") || 
+                                                                   mergedEffectName.equals("ABAT") || 
+                                                                   mergedEffectName.equals("ABSK"))
+                                mergedEffectSubtype = SerializedElement.getInteger(mergedSubrecordData, 20);
+                            if (effectName.equals("SEFF")) {
+                                PluginSubrecord mscitSubrecord = null;
+                                if (mlit.hasNext()) {
+                                    mscitSubrecord = mlit.next();
+                                    if (mscitSubrecord.getSubrecordType().equals("SCIT")) {
+                                        mergedSubrecordData = mscitSubrecord.getSubrecordData();
+                                        int mergedScriptID = SerializedElement.getInteger(mergedSubrecordData, 0);
+                                        if (mergedScriptID == scriptID) {
+                                            addEffect = false;
+                                            break;
+                                        }
+                                    } else {
+                                        mscitSubrecord = null;
+                                    }
+                                }
+
+                                if (mscitSubrecord == null)
+                                    throw new PluginException("SCIT subrecord missing for script effect");
+                            } else if (mergedEffectSubtype == effectSubtype) {
+                                addEffect = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                //
+                // Add a new effect to the merged effects
+                //
+                if (addEffect) {
+                    byte[] mergedSubrecordData = new byte[4];
+                    mergedSubrecordData[0] = subrecordData[0];
+                    mergedSubrecordData[1] = subrecordData[1];
+                    mergedSubrecordData[2] = subrecordData[2];
+                    mergedSubrecordData[3] = subrecordData[3];
+                    mergedSubrecordList.add(new PluginSubrecord(recordType, "EFID", mergedSubrecordData));
+                    mergedSubrecordList.add(subrecord);
+                    if (scitSubrecord != null) {
+                        mergedSubrecordList.add(scitSubrecord);
+                        if (fullSubrecord != null)
+                            mergedSubrecordList.add(fullSubrecord);
+                    }
+
+                    modifiedMergedList = true;
+                }
+            }
+        }
+
+        //
+        // Update the ENIT/SPIT fields for the merged spell
+        //
+        if (modifiedMergedList) {
+            for (PluginSubrecord subrecord : mergedSubrecordList) {
+                String subrecordType = subrecord.getSubrecordType();
+                if (!subrecordType.equals("ENIT") && !subrecordType.equals("SPIT"))
+                    continue;
+
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (recordType.equals("ALCH") || recordType.equals("INGR")) {
+                    int mergedField1 = SerializedElement.getInteger(subrecordData, 0);
+                    mergedField1 = Math.max(pluginField1, mergedField1);
+                    SerializedElement.setInteger(mergedField1, subrecordData, 0);
+                    if (!autoCalculate)
+                        subrecordData[4] = (byte)(subrecordData[4] | 1);
+                } else {
+                    int mergedField1 = SerializedElement.getInteger(subrecordData, 4);
+                    int mergedField2 = SerializedElement.getInteger(subrecordData, 8);
+                    mergedField1 = Math.max(pluginField1, mergedField1);
+                    mergedField2 = Math.max(pluginField2, mergedField2);
+                    SerializedElement.setInteger(mergedField1, subrecordData, 4);
+                    SerializedElement.setInteger(mergedField2, subrecordData, 8);
+                    if (!autoCalculate)
+                        subrecordData[12] = (byte)(subrecordData[12] | 1);
+                }
+
+                break;
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge a faction
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeFaction(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Merge the attribute subrecords. The FNAM, INAM, MNAM, RNAM and XNAM
+        // subrecords will be processed later.
+        //
+        String[] exclusionList = { "FNAM", "INAM", "MNAM", "RNAM", "XNAM" };
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        int formID = mergedRecord.getFormID();
+        int masterID = formID >>> 24;
+        if (masterID >= mergedMasterCount)
+            throw new PluginException("Merged master ID " + masterID + " is not valid");
+
+        Master master = masters[masterID];
+        PluginRecord masterRecord = master.getRecord(formID);
+        List<PluginSubrecord> masterSubrecordList = masterRecord.getSubrecords();
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Merge the faction ranks (RNAM, MNAM, FNAM, INAM)
+        //
+        // The faction ranks are numbered sequentially starting with zero.
+        // Inserting or deleting a rank will renumber all of the ranks after the
+        // insertion/deletion point. So we will determine if the faction rank list 
+        // has been changed by counting the number of ranks.  The list with a different 
+        // number of ranks than the master faction will be used. If both lists have a 
+        // different number of ranks, then the list will be chosen based on
+        // whether or not we should delete the last conflict.
+        //
+        int ranks = 0, mergedRanks = 0, masterRanks = 0;
+        for (PluginSubrecord subrecord : subrecordList)
+            if (subrecord.getSubrecordType().equals("RNAM"))
+                ranks++;
+
+        for (PluginSubrecord subrecord : mergedSubrecordList)
+            if (subrecord.getSubrecordType().equals("RNAM"))
+                mergedRanks++;
+
+        for (PluginSubrecord subrecord : masterSubrecordList)
+            if (subrecord.getSubrecordType().equals("RNAM"))
+                masterRanks++;
+
+        boolean keepFirst = true;
+        if (mergedRanks == masterRanks) {
+            if (ranks != masterRanks)
+                keepFirst = false;
+            else if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                keepFirst = false;
+        } else if (ranks != masterRanks) {
+            if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                keepFirst = false;
+        }
+
+        if (!keepFirst) {
+            modifiedMergedList = true;
+            ListIterator<PluginSubrecord> lit = mergedSubrecordList.listIterator();
+            while (lit.hasNext()) {
+                PluginSubrecord subrecord = lit.next();
+                String subrecordType = subrecord.getSubrecordType();
+                if (subrecordType.equals("RNAM") || subrecordType.equals("MNAM") || 
+                                                    subrecordType.equals("FNAM") || 
+                                                    subrecordType.equals("INAM"))
+                    lit.remove();
+            }
+
+            for (PluginSubrecord subrecord : subrecordList) {
+                String subrecordType = subrecord.getSubrecordType();
+                if (subrecordType.equals("RNAM") || subrecordType.equals("MNAM") || 
+                                                    subrecordType.equals("FNAM") || 
+                                                    subrecordType.equals("INAM"))
+                    mergedSubrecordList.add(subrecord);
+            }
+        }
+
+        //
+        // Merge the interfaction relations (XNAM)
+        //
+        // Add new factions to the merged list and adjust the faction modifier based
+        // on which one is not the same as the master list.
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            if (!subrecord.getSubrecordType().equals("XNAM"))
+                continue;
+
+            byte[] subrecordData = subrecord.getSubrecordData();
+            int faction = SerializedElement.getInteger(subrecordData, 0);
+            boolean insertSubrecord = true;
+            boolean foundSubrecord = false;
+            int index = 0;
+            for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                if (mergedSubrecord.getSubrecordType().equals("XNAM")) {
+                    foundSubrecord = true;
+                    subrecordData = mergedSubrecord.getSubrecordData();
+                    int mergedFaction = SerializedElement.getInteger(subrecordData, 0);
+                    if (faction == mergedFaction) {
+                        if (subrecord.equals(mergedSubrecord))
+                            insertSubrecord = false;
+                        else if (masterSubrecordList.indexOf(mergedSubrecord) < 0)
+                            if (masterSubrecordList.indexOf(subrecord) < 0)
+                                if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                                    mergedSubrecordList.remove(index);
+                                else
+                                    insertSubrecord = false;
+                            else
+                                insertSubrecord = false;
+                        else
+                            mergedSubrecordList.remove(index);
+
+                        break;
+                    }
+                } else if (foundSubrecord) {
+                    break;
+                }
+
+                index++;
+            }
+
+            if (insertSubrecord) {
+                mergedSubrecordList.add(index, subrecord);
+                modifiedMergedList = true;
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge a leveled list (LVLC, LVLI, LVSP)
+     *
+     * @param       mergedRecord            The merged leveled list record
+     * @param       record                  The plugin leveled list record to be merge
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeLeveledList(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        String recordType = record.getRecordType();
+
+        //
+        // Get the subrecord lists
+        //
+        int formID = mergedRecord.getFormID();
+        int masterID = formID >>> 24;
+        if (masterID >= mergedMasterCount)
+            throw new PluginException("Merged leveled list master ID " + masterID + " is not valid");
+
+        Master master = masters[masterID];
+        PluginRecord masterRecord = master.getRecord(formID);
+        List<PluginSubrecord> masterSubrecordList = masterRecord.getSubrecords();
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Some of the leveled lists in the Oblivion.esm use an old format where
+        // there is no LVLF subrecord and the high-order bit of the LVLD subrecord
+        // is used for the "calculate from all levels <= PC's level" flag.  We
+        // need to convert this format into the newer LVLD/LVLF format to make
+        // our matching code easier (the Oblivion CS always uses the new format
+        // for plugin records.
+        //
+        boolean foundFlags = false;
+        int chanceIndex = -1;
+        int subrecordIndex = 0;
+        for (PluginSubrecord masterSubrecord : masterSubrecordList) {
+            if (masterSubrecord.getSubrecordType().equals("LVLF")) {
+                foundFlags = true;
+                break;
+            }
+
+            if (masterSubrecord.getSubrecordType().equals("LVLD"))
+                chanceIndex = subrecordIndex;
+
+            subrecordIndex++;
+        }
+
+        if (!foundFlags) {
+            if (chanceIndex < 0) {
+                byte[] flagsData = new byte[1];
+                flagsData[0] = 0;
+                masterSubrecordList.add(new PluginSubrecord(recordType, "LVLF", flagsData));
+                byte[] chanceData = new byte[1];
+                chanceData[0] = 0;
+                masterSubrecordList.add(new PluginSubrecord(recordType, "LVLD", chanceData));
+            } else {
+                PluginSubrecord chanceSubrecord = masterSubrecordList.get(chanceIndex);
+                byte[] chanceData = chanceSubrecord.getSubrecordData();
+                byte[] flagsData = new byte[1];
+                flagsData[0] = (byte) ((chanceData[0] & 0xff) >>> 7);
+                chanceData[0] = (byte) (chanceData[0] & 0x7f);
+                masterSubrecordList.add(new PluginSubrecord(recordType, "LVLF", flagsData));
+            }
+        }
+
+        //
+        // Merge the leveled list attribute subrecords (LVLD, LVLF, SCRI,
+        // TNAM)
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            boolean foundSubrecord = false;
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("LVLO"))
+                continue;
+
+            //
+            // Check each merged subrecord for the plugin record
+            //
+            for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                if (mergedSubrecord.getSubrecordType().equals(subrecordType)) {
+                    foundSubrecord = true;
+                    boolean replaceSubrecord = false;
+                    if (!mergedSubrecord.equals(subrecord)) {
+                        int mergedIndex = masterSubrecordList.indexOf(mergedSubrecord);
+                        int index = masterSubrecordList.indexOf(subrecord);
+                        if (mergedIndex < 0) {
+
+                            //
+                            // The merged subrecord is not the same as the
+                            // master subrecord
+                            //
+                            if (index < 0) {
+
+                                //
+                                // We have a conflict since neither subrecord is the
+                                // same as the master subrecord
+                                //
+                                if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                                    replaceSubrecord = true;
+                            }
+
+                        } else {
+
+                            //
+                            // The merged subrecord is the same as the master subrecord
+                            // while the plugin subrecord is not the same.
+                            //
+                            replaceSubrecord = true;
+                        }
+                    }
+
+                    if (replaceSubrecord) {
+                        int index = mergedSubrecordList.indexOf(mergedSubrecord);
+                        mergedSubrecordList.remove(index);
+                        mergedSubrecordList.add(index, subrecord);
+                    }
+
+                    break;
+                }
+            }
+
+            //
+            // Add the subrecord if it is not already present in the merged record
+            //
+            if (!foundSubrecord)
+                mergedSubrecordList.add(subrecord);
+        }
+
+        //
+        // Merge the leveled list items (LVLO)
+        //
+        // There is an LVLO subrecord for each item in the leveled list.
+        // Bytes 0-1 contain the level number and bytes 4-7 contaim the item Form ID.
+        // The Construction Set creates the LVLO subrecords sorted by the level number.
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            if (subrecord.getSubrecordType().equals("LVLO")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                int itemLevel = SerializedElement.getShort(subrecordData, 0);
+                int itemID = SerializedElement.getInteger(subrecordData, 4);
+                boolean duplicate = false;
+                int index = 0;
+                for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                    if (mergedSubrecord.getSubrecordType().equals("LVLO")) {
+                        byte[] mergedSubrecordData = mergedSubrecord.getSubrecordData();
+                        int mergedItemLevel = SerializedElement.getShort(mergedSubrecordData, 0);
+                        int mergedItemID = SerializedElement.getInteger(mergedSubrecordData, 4);
+                        if (mergedItemLevel > itemLevel)
+                            break;
+
+                        if (mergedItemLevel == itemLevel && mergedItemID == itemID) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+
+                    index++;
+                }
+
+                if (!duplicate)
+                    mergedSubrecordList.add(index, subrecord);
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge an NPC or creature
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeNPC(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Merge the attribute subrecords. The CNTO, CSDC, CSDI, CSDT, PKID, SNAM and SPLO subrecords
+        // will be processed later.
+        //
+        String[] exclusionList = {"CNTO", "CSDC", "CSDI", "CSDT", "PKID", "SNAM", "SPLO"};
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Merge the inventory items (CNTO)
+        //
+        if (mergeList("CNTO", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the AI packages (PKID)
+        //
+        if (mergeList("PKID", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the factions (SNAM)
+        //
+        if (mergeList("SNAM", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the spells (SPLO)
+        //
+        if (mergeList("SPLO", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+        
+        //
+        // Merge the creature sounds (CSDT, CSDI, CSDC)
+        //
+        // CSDT contains the sound index, CSDI contains the sound form ID, and CSDC contains the
+        // probability for the sound.
+        //
+        if (record.getRecordType().equals("CREA") && (masterMerge || !pluginInfo.shouldDeleteLastConflict())) {
+            ListIterator<PluginSubrecord> lit = subrecordList.listIterator();
+            while (lit.hasNext()) {
+                PluginSubrecord subrecord = lit.next();
+                if (subrecord.getSubrecordType().equals("CSDT")) {
+                    int soundIndex = SerializedElement.getInteger(subrecord.getSubrecordData(), 0);
+                    boolean foundSound = false;
+                    ListIterator<PluginSubrecord> mlit = mergedSubrecordList.listIterator();
+                    while (mlit.hasNext()) {
+                        PluginSubrecord mergedSubrecord = mlit.next();
+                        if (mergedSubrecord.getSubrecordType().equals("CSDT")) {
+                            int mergedIndex = SerializedElement.getInteger(mergedSubrecord.getSubrecordData(), 0);
+                            if (mergedIndex == soundIndex) {
+                                foundSound = true;
+                                mlit.set(subrecord);
+                                mlit.next();
+                                mlit.set(lit.next());
+                                mlit.next();
+                                mlit.set(lit.next());
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!foundSound) {
+                        mergedSubrecordList.add(subrecord);
+                        mergedSubrecordList.add(lit.next());
+                        mergedSubrecordList.add(lit.next());
+                    }
+                    
+                    modifiedMergedList = true;
+                }
+            }
+        }
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge a race
+     *
+     * @param       mergedRecord            The merged record
+     * @param       record                  The plugin record
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void mergeRace(PluginRecord mergedRecord, PluginRecord record) 
+                                            throws DataFormatException, IOException, PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Merge the attribute subrecords. The ENAM, FNAM, HNAM, ICON, INDX,
+        // MNAM, MODB, MODL, NAM0, NAM1, SPLO and XNAM subrecords will be processed later.
+        //
+        String[] exclusionList = { "ENAM", "FNAM", "HNAM", "ICON", "INDX", "MNAM", "MODB", "MODL", "NAM0", "NAM1", "SPLO", "XNAM" };
+        mergeSubrecords(mergedRecord, record, exclusionList);
+
+        //
+        // Get the subrecord lists
+        //
+        int formID = mergedRecord.getFormID();
+        int masterID = formID >>> 24;
+        if (masterID >= mergedMasterCount)
+            throw new PluginException("Merged master ID " + masterID + " is not valid");
+
+        Master master = masters[masterID];
+        PluginRecord masterRecord = master.getRecord(formID);
+        List<PluginSubrecord> masterSubrecordList = masterRecord.getSubrecords();
+        List<PluginSubrecord> mergedSubrecordList = mergedRecord.getSubrecords();
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+
+        //
+        // Merge the racial abilities (SPLO)
+        //
+        if (mergeList("SPLO", mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the racial reactions (XNAM)
+        //
+        // Add new races to the merged list and adjust the racial modifier based
+        // on which one is not the same as the master list.
+        //
+        for (PluginSubrecord subrecord : subrecordList) {
+            if (!subrecord.getSubrecordType().equals("XNAM"))
+                continue;
+
+            byte[] subrecordData = subrecord.getSubrecordData();
+            int raceID = SerializedElement.getInteger(subrecordData, 0);
+            int modifier = SerializedElement.getInteger(subrecordData, 4);
+            boolean insertSubrecord = true;
+            boolean foundSubrecord = false;
+            int index = 0;
+            for (PluginSubrecord mergedSubrecord : mergedSubrecordList) {
+                if (mergedSubrecord.getSubrecordType().equals("XNAM")) {
+                    foundSubrecord = true;
+                    subrecordData = mergedSubrecord.getSubrecordData();
+                    int mergedRaceID = SerializedElement.getInteger(subrecordData, 0);
+                    int mergedModifier = SerializedElement.getInteger(subrecordData, 4);
+                    if (raceID == mergedRaceID) {
+                        if (subrecord.equals(mergedSubrecord))
+                            insertSubrecord = false;
+                        else if (masterSubrecordList.indexOf(mergedSubrecord) < 0)
+                            if (masterSubrecordList.indexOf(subrecord) < 0)
+                                if (masterMerge || !pluginInfo.shouldDeleteLastConflict())
+                                    mergedSubrecordList.remove(index);
+                                else
+                                    insertSubrecord = false;
+                            else
+                                insertSubrecord = false;
+                        else
+                            mergedSubrecordList.remove(index);
+
+                        break;
+                    }
+                } else if (foundSubrecord) {
+                    break;
+                }
+
+                index++;
+            }
+
+            if (insertSubrecord) {
+                mergedSubrecordList.add(index, subrecord);
+                modifiedMergedList = true;
+            }
+        }
+
+        //
+        // Merge the eye list (ENAM)
+        //
+        if (mergeArray("ENAM", 4, mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the hair list (HNAM)
+        //
+        if (mergeArray("HNAM", 4, mergedSubrecordList, subrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the face data (NAM0, INDX, MODL, MODB, ICON)
+        //
+        if (mergeFaceData(subrecordList, mergedSubrecordList, masterSubrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Merge the body data (NAM1, MNAM, FNAM, INDX, ICON)
+        //
+        if (mergeBodyData(subrecordList, mergedSubrecordList, masterSubrecordList))
+            modifiedMergedList = true;
+
+        //
+        // Store the updated subrecords
+        //
+        if (modifiedMergedList)
+            mergedRecord.setSubrecords(mergedSubrecordList);
+    }
+
+    /**
+     * Merge face data for a race. The NAM0 subrecord marks the start of the
+     * face data. The INDX, MODL, MODB and ICON subrecords repeat for each
+     * entry. The INDX subrecord is always present but the MODL/MODB/ICON
+     * subrecords are omitted if the corresponding value has not been set.
+     * The NAM1 subrecord marks the end of the face data. The face data
+     * (NAM0) subrecord must precede the body data (NAM1) subrecord in the
+     * subrecord list.
+     *
+     * @param       subrecordList           The plugin subrecord list
+     * @param       mergedSubrecordList     The merged subrecord list
+     * @param       masterSubrecordList     The master subrecord list
+     * @exception   PluginException         The plugin is not valid
+     */
+    private boolean mergeFaceData(List<PluginSubrecord> subrecordList, List<PluginSubrecord> mergedSubrecordList,
+                                  List<PluginSubrecord> masterSubrecordList) throws PluginException {
+        boolean modifiedMergedList = false;
+        String subrecordType;
+
+        //
+        // Build the plugin face data arrays
+        //
+        boolean foundList = false;
+        int count = 0;
+        for (PluginSubrecord subrecord : subrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("NAM1")) {
+                if (!foundList)
+                    throw new PluginException("Face data does not precede body data");
+
+                break;
+            }
+
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] indx = new PluginSubrecord[count];
+        PluginSubrecord[] modl = new PluginSubrecord[count];
+        PluginSubrecord[] modb = new PluginSubrecord[count];
+        PluginSubrecord[] icon = new PluginSubrecord[count];
+        int index = -1;
+        foundList = false;
+        for (PluginSubrecord subrecord : subrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                index++;
+                indx[index] = subrecord;
+            } else if (subrecordType.equals("MODL")) {
+                modl[index] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                modb[index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                icon[index] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        //
+        // Build the merged face data arrays
+        //
+        foundList = false;
+        count = 0;
+        for (PluginSubrecord subrecord : mergedSubrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("NAM1")) {
+                if (!foundList)
+                    throw new PluginException("Face data does not precede body data");
+
+                break;
+            }
+
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] mindx = new PluginSubrecord[count];
+        PluginSubrecord[] mmodl = new PluginSubrecord[count];
+        PluginSubrecord[] mmodb = new PluginSubrecord[count];
+        PluginSubrecord[] micon = new PluginSubrecord[count];
+        index = -1;
+        foundList = false;
+        for (PluginSubrecord subrecord : mergedSubrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                index++;
+                mindx[index] = subrecord;
+            } else if (subrecordType.equals("MODL")) {
+                mmodl[index] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                mmodb[index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                micon[index] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        //
+        // Build the master face data arrays
+        //
+        foundList = false;
+        count = 0;
+        for (PluginSubrecord subrecord : masterSubrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("NAM1")) {
+                if (!foundList)
+                    throw new PluginException("Face data does not precede body data");
+
+                break;
+            }
+
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] xindx = new PluginSubrecord[count];
+        PluginSubrecord[] xmodl = new PluginSubrecord[count];
+        PluginSubrecord[] xmodb = new PluginSubrecord[count];
+        PluginSubrecord[] xicon = new PluginSubrecord[count];
+        index = -1;
+        foundList = false;
+        for (PluginSubrecord subrecord : masterSubrecordList) {
+            subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                index++;
+                xindx[index] = subrecord;
+            } else if (subrecordType.equals("MODL")) {
+                xmodl[index] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                xmodb[index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                xicon[index] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        //
+        // Since the INDX record is always present, the array sizes must be
+        // the same
+        //
+        if (indx.length != mindx.length || indx.length != xindx.length)
+            throw new PluginException("Face data maximum index values are not the same");
+
+        //
+        // Process the plugin face data and update the merged face data
+        //
+        boolean rebuildMergedData = false;
+        for (int i = 0; i < indx.length; i++) {
+            if (!indx[i].equals(mindx[i]) || !indx[i].equals(xindx[i]))
+                throw new PluginException("Incorrect face data index progression");
+
+            if (modl[i] != null) {
+                if (mmodl[i] != null) {
+                    if (!modl[i].equals(mmodl[i])) {
+                        if (xmodl[i] != null) {
+                            if (!modl[i].equals(xmodl[i])) {
+                                if (!mmodl[i].equals(xmodl[i])) {
+                                    if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                                        mmodl[i] = modl[i];
+                                        rebuildMergedData = true;
+                                    }
+                                } else {
+                                    mmodl[i] = modl[i];
+                                    rebuildMergedData = true;
+                                }
+                            }
+                        } else if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                            mmodl[i] = modl[i];
+                            rebuildMergedData = true;
+                        }
+                    }
+                } else {
+                    mmodl[i] = modl[i];
+                    rebuildMergedData = true;
+                }
+            }
+
+            if (icon[i] != null) {
+                if (micon[i] != null) {
+                    if (!icon[i].equals(micon[i])) {
+                        if (xicon[i] != null) {
+                            if (!icon[i].equals(xicon[i])) {
+                                if (!micon[i].equals(xicon[i])) {
+                                    if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                                        micon[i] = icon[i];
+                                        rebuildMergedData = true;
+                                    }
+                                } else {
+                                    micon[i] = icon[i];
+                                    rebuildMergedData = true;
+                                }
+                            }
+                        } else if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                            micon[i] = icon[i];
+                            rebuildMergedData = true;
+                        }
+                    }
+                } else {
+                    micon[i] = icon[i];
+                    rebuildMergedData = true;
+                }
+            }
+        }
+
+        //
+        // Rebuild the merged face data if it has been modified
+        //
+        if (rebuildMergedData) {
+            modifiedMergedList = true;
+            index = 0;
+            foundList = false;
+            ListIterator<PluginSubrecord> lit = mergedSubrecordList.listIterator();
+            while (lit.hasNext()) {
+                PluginSubrecord subrecord = lit.next();
+                subrecordType = subrecord.getSubrecordType();
+                if (foundList) {
+                    if (subrecordType.equals("INDX") || subrecordType.equals("MODL") || 
+                                                        subrecordType.equals("MODB") || 
+                                                        subrecordType.equals("ICON")) {
+                        lit.remove();
+                    } else {
+                        break;
+                    }
+                } else if (subrecordType.equals("NAM0")) {
+                    foundList = true;
+                    lit.remove();
+                } else {
+                    index++;
+                }
+            }
+
+            for (int i=mindx.length-1; i>=0; i--) {
+                if (micon[i] != null)
+                    mergedSubrecordList.add(index, micon[i]);
+
+                if (mmodb[i] != null)
+                    mergedSubrecordList.add(index, mmodb[i]);
+
+                if (mmodl[i] != null)
+                    mergedSubrecordList.add(index, mmodl[i]);
+
+                mergedSubrecordList.add(index, mindx[i]);
+            }
+
+            byte[] subrecordData = new byte[0];
+            mergedSubrecordList.add(index, new PluginSubrecord("RACE", "NAM0", subrecordData));
+        }
+
+        return modifiedMergedList;
+    }
+
+    /**
+     * Merge body data for a race. The NAM1 subrecord marks the start of the
+     * body data. The INDX and ICON subrecords repeat for each entry. The
+     * INDX subrecord is always present but the ICON subrecord is omitted if
+     * the corresponding value has not been set. The MODL and MODB records
+     * are present if the race has a tail mesh and are omitted otherwise.
+     *
+     * The MNAM subrecord marks the start of the male body data while the
+     * FNAM subrecord marks the start of the female body data. The FNAM
+     * subrecord must follow the MNAM subrecord. In addition, the body data
+     * (NAM1) subrecord must follow the face data (NAM0) subrecord in the
+     * subrecord list.
+     *
+     * @param       subrecordList           The plugin subrecord list
+     * @param       mergedSubrecordList     The merged subrecord list
+     * @param       masterSubrecordList     The master subrecord list
+     * @exception   PluginException         The plugin is not valid
+     */
+    private boolean mergeBodyData(List<PluginSubrecord> subrecordList, List<PluginSubrecord> mergedSubrecordList,
+                                  List<PluginSubrecord> masterSubrecordList) throws PluginException {
+        boolean modifiedMergedList = false;
+
+        //
+        // Build the plugin body data arrays
+        //
+        boolean foundList = false;
+        boolean foundFace = false;
+        int count = 0;
+
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0")) {
+                    foundFace = true;
+                } else if (subrecordType.equals("NAM1")) {
+                    if (!foundFace)
+                        throw new PluginException("Face data does not precede body data");
+
+                    foundList = true;
+                }
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] indx = new PluginSubrecord[count];
+        PluginSubrecord[] icon = new PluginSubrecord[count];
+        PluginSubrecord[] modl = new PluginSubrecord[2];
+        PluginSubrecord[] modb = new PluginSubrecord[2];
+        int index = -1;
+        int femaleIndex = -1;
+        boolean foundFemale = false;
+        foundList = false;
+
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM1"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                indx[++index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                icon[index] = subrecord;
+            } else if (subrecordType.equals("MNAM")) {
+                if (foundFemale)
+                    throw new PluginException("Female body data does not follow male body data");
+            } else if (subrecordType.equals("FNAM")) {
+                foundFemale = true;
+                femaleIndex = index + 1;
+            } else if (subrecordType.equals("MODL")) {
+                if (!foundFemale)
+                    modl[0] = subrecord;
+                else
+                    modl[1] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                if (!foundFemale)
+                    modb[0] = subrecord;
+                else
+                    modb[1] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        if (!foundFemale)
+            throw new PluginException("No female body data");
+
+        //
+        // Build the merged body data arrays
+        //
+        foundList = false;
+        foundFace = false;
+        count = 0;
+
+        for (PluginSubrecord subrecord : mergedSubrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0")) {
+                    foundFace = true;
+                } else if (subrecordType.equals("NAM1")) {
+                    if (!foundFace)
+                        throw new PluginException("Face data does not precede body data");
+
+                    foundList = true;
+                }
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] mindx = new PluginSubrecord[count];
+        PluginSubrecord[] micon = new PluginSubrecord[count];
+        PluginSubrecord[] mmodl = new PluginSubrecord[2];
+        PluginSubrecord[] mmodb = new PluginSubrecord[2];
+        index = -1;
+        foundList = false;
+        foundFemale = false;
+
+        for (PluginSubrecord subrecord : mergedSubrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM1"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                mindx[++index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                micon[index] = subrecord;
+            } else if (subrecordType.equals("MNAM")) {
+                if (foundFemale)
+                    throw new PluginException("Female body data does not follow male body data");
+            } else if (subrecordType.equals("FNAM")) {
+                foundFemale = true;
+            } else if (subrecordType.equals("MODL")) {
+                if (!foundFemale)
+                    mmodl[0] = subrecord;
+                else
+                    mmodl[1] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                if (!foundFemale)
+                    mmodb[0] = subrecord;
+                else
+                    mmodb[1] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        //
+        // Build the master body data arrays
+        //
+        foundList = false;
+        foundFace = false;
+        count = 0;
+
+        for (PluginSubrecord subrecord : masterSubrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM0")) {
+                    foundFace = true;
+                } else if (subrecordType.equals("NAM1")) {
+                    if (!foundFace)
+                        throw new PluginException("Face data does not precede body data");
+
+                    foundList = true;
+                }
+            } else if (subrecordType.equals("INDX")) {
+                count++;
+            }
+        }
+
+        PluginSubrecord[] xindx = new PluginSubrecord[count];
+        PluginSubrecord[] xicon = new PluginSubrecord[count];
+        PluginSubrecord[] xmodl = new PluginSubrecord[2];
+        PluginSubrecord[] xmodb = new PluginSubrecord[2];
+        index = -1;
+        foundList = false;
+        foundFemale = false;
+
+        for (PluginSubrecord subrecord : masterSubrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (!foundList) {
+                if (subrecordType.equals("NAM1"))
+                    foundList = true;
+            } else if (subrecordType.equals("INDX")) {
+                xindx[++index] = subrecord;
+            } else if (subrecordType.equals("ICON")) {
+                xicon[index] = subrecord;
+            } else if (subrecordType.equals("MNAM")) {
+                if (foundFemale)
+                    throw new PluginException("Female body data does not follow male body data");
+            } else if (subrecordType.equals("FNAM")) {
+                foundFemale = true;
+            } else if (subrecordType.equals("MODL")) {
+                if (!foundFemale)
+                    xmodl[0] = subrecord;
+                else
+                    xmodl[1] = subrecord;
+            } else if (subrecordType.equals("MODB")) {
+                if (!foundFemale)
+                    xmodb[0] = subrecord;
+                else
+                    xmodb[1] = subrecord;
+            } else {
+                break;
+            }
+        }
+
+        //
+        // Since the INDX record is always present, the array sizes must be
+        // the same
+        //
+        if (indx.length != mindx.length || indx.length != xindx.length)
+            throw new PluginException("Body data maximum index values are not the same");
+
+        //
+        // Process the plugin body data and update the merged body data
+        //
+        boolean rebuildMergedData = false;
+
+        for (int i=0; i<indx.length; i++) {
+            if (!indx[i].equals(mindx[i]) || !indx[i].equals(xindx[i]))
+                throw new PluginException("Incorrect body data index progression");
+
+            if (icon[i] != null) {
+                if (micon[i] != null) {
+                    if (!icon[i].equals(micon[i])) {
+                        if (xicon[i] != null) {
+                            if (!icon[i].equals(xicon[i])) {
+                                if (!micon[i].equals(xicon[i])) {
+                                    if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                                        micon[i] = icon[i];
+                                        rebuildMergedData = true;
+                                    }
+                                } else {
+                                    micon[i] = icon[i];
+                                    rebuildMergedData = true;
+                                }
+                            }
+                        } else if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                            micon[i] = icon[i];
+                            rebuildMergedData = true;
+                        }
+                    }
+                } else {
+                    micon[i] = icon[i];
+                    rebuildMergedData = true;
+                }
+            }
+        }
+
+        for (int i=0; i<2; i++) {
+            if (modl[i] != null) {
+                if (mmodl[i] != null) {
+                    if (xmodl[i] != null) {
+                        if (!modl[i].equals(xmodl[i])) {
+                            if (!mmodl[i].equals(xmodl[i])) {
+                                if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                                    mmodl[i] = modl[i];
+                                    mmodb[i] = modb[i];
+                                    rebuildMergedData = true;
+                                }
+                            } else {
+                                mmodl[i] = modl[i];
+                                mmodb[i] = modb[i];
+                                rebuildMergedData = true;
+                            }
+                        }
+                    } else if (masterMerge || !pluginInfo.shouldDeleteLastConflict()) {
+                        mmodl[i] = modl[i];
+                        mmodb[i] = modb[i];
+                        rebuildMergedData = true;
+                    }
+                } else {
+                    mmodl[i] = modl[i];
+                    mmodb[i] = modb[i];
+                    rebuildMergedData = true;
+                }
+            }
+        }
+
+        //
+        // Rebuild the merged face data if it has been changed
+        //
+        if (rebuildMergedData) {
+            modifiedMergedList = true;
+            index = 0;
+            foundList = false;
+            ListIterator<PluginSubrecord> lit = mergedSubrecordList.listIterator();
+            while (lit.hasNext()) {
+                PluginSubrecord subrecord = lit.next();
+                String subrecordType = subrecord.getSubrecordType();
+                if (foundList) {
+                    if (subrecordType.equals("INDX") || subrecordType.equals("MNAM") || 
+                                                        subrecordType.equals("FNAM") || 
+                                                        subrecordType.equals("MODL") || 
+                                                        subrecordType.equals("MODB") || 
+                                                        subrecordType.equals("ICON")) {
+                        lit.remove();
+                    } else {
+                        break;
+                    }
+                } else if (subrecordType.equals("NAM1")) {
+                    foundList = true;
+                    lit.remove();
+                } else {
+                    index++;
+                }
+            }
+
+            byte[] subrecordData = new byte[0];
+            for (int i=mindx.length-1; i>=0; i--) {
+                if (micon[i] != null)
+                    mergedSubrecordList.add(index, micon[i]);
+
+                mergedSubrecordList.add(index, mindx[i]);
+                if (i == femaleIndex) {
+                    if (mmodb[1] != null)
+                        mergedSubrecordList.add(index, mmodb[1]);
+
+                    if (mmodl[1] != null)
+                        mergedSubrecordList.add(index, mmodl[1]);
+
+                    mergedSubrecordList.add(index, new PluginSubrecord("RACE", "FNAM", subrecordData));
+                }
+            }
+
+            if (mmodb[0] != null)
+                mergedSubrecordList.add(index, mmodb[0]);
+
+            if (mmodl[0] != null)
+                mergedSubrecordList.add(index, mmodl[0]);
+
+            mergedSubrecordList.add(index, new PluginSubrecord("RACE", "MNAM", subrecordData));
+            mergedSubrecordList.add(index, new PluginSubrecord("RACE", "NAM1", subrecordData));
+        }
+
+        return modifiedMergedList;
+    }
+
+    /**
+     * Copy the plugin voice files to the merged plugin
+     *
+     * @param       plugin                  The current plugin
+     * @param       voiceDirectory          Current plugin voice directory
+     * @param       mergedPath              Merged plugin voice path
+     * @exception   DataFormatException     Compression error occurred
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The plugin is not valid
+     */
+    private void copyVoiceFiles(Plugin plugin, File voiceDirectory, String mergedPath) 
+                                            throws DataFormatException, IOException, PluginException {
+        File[] files = voiceDirectory.listFiles();
+        List<FormInfo> formList = plugin.getFormList();
+        Map<Integer, FormInfo> formMap = plugin.getFormMap();
+        int masterID = plugin.getMasterList().size();
+
+        //
+        // Copy each voice file in the current directory to the merged directory. A
+        // valid voice file name is 'questEditorID_topicEditorID_infoFormID_response'.
+        // We will ignore files that do not follow this format. Note that the
+        // infoFormID is always 00xxxxxx.
+        //
+        for (File file : files) {
+            if (file.isDirectory()) {
+
+                //
+                // Process the files in a subdirectory
+                //
+                String path = mergedPath + Main.fileSeparator + file.getName();
+                copyVoiceFiles(plugin, file, path);
+
+            } else {
+
+                //
+                // Parse the file name to get the quest editor ID, the topic
+                // editor ID and the info form ID
+                //
+                String name = file.getName();
+                int questSep = name.indexOf('_');
+                if (questSep < 1)
+                    continue;
+
+                int topicSep = name.indexOf('_', questSep+1);
+                if (topicSep < questSep + 2)
+                    continue;
+
+                int infoSep = name.indexOf('_', topicSep+1);
+                if (infoSep < topicSep + 2)
+                    continue;
+
+                int infoID;
+                try {
+                    infoID = Integer.parseInt(name.substring(topicSep+1, infoSep), 16);
+                } catch (NumberFormatException exc) {
+                    infoID = 0;
+                }
+
+                if (infoID == 0)
+                    continue;
+
+                //
+                // Get the INFO record for this voice file. We will skip the file
+                // if we don't have an INFO record for it.
+                //
+                infoID = infoID | (masterID<<24);
+                FormInfo infoForm = formMap.get(new Integer(infoID));
+                if (infoForm == null)
+                    continue;
+
+                PluginRecord infoRecord = (PluginRecord) infoForm.getSource();
+
+                //
+                // The parent of an INFO record is the DIAL record. We will always
+                // have a DIAL record even if the INFO is for a quest topic defined
+                // in a master file.
+                //
+                int topicID = infoForm.getParentFormID();
+                if (topicID == 0)
+                    continue;
+
+                FormInfo topicForm = formMap.get(new Integer(topicID));
+                if (topicForm == null)
+                    continue;
+
+                String topicName = topicForm.getMergedEditorID();
+
+                //
+                // The quest for an INFO is specified by the QSTI subrecord.  We
+                // might not have the QUST record if the INFO is for a quest topic
+                // define in a master file. In this case, we will use the original
+                // quest editor ID obtained from the file name.
+                //
+                int questID = 0;
+                List<PluginSubrecord> subrecordList = infoRecord.getSubrecords();
+                for (PluginSubrecord subrecord : subrecordList) {
+                    if (subrecord.getSubrecordType().equals("QSTI")) {
+                        byte[] subrecordData = subrecord.getSubrecordData();
+                        questID = SerializedElement.getInteger(subrecordData, 0);
+                        break;
+                    }
+                }
+
+                if (questID == 0)
+                    continue;
+
+                String questName;
+                FormInfo questForm = formMap.get(new Integer(questID));
+                if (questForm == null)
+                    questName = name.substring(0, questSep);
+                else
+                    questName = questForm.getMergedEditorID();
+
+                //
+                // Copy the voice file
+                //
+                File mergedDirectory = new File(mergedPath);
+                if (!mergedDirectory.exists())
+                    mergedDirectory.mkdirs();
+
+                String mergedName = String.format("%s%s%s_%s_%08X_%s", 
+                                                  mergedPath, Main.fileSeparator, questName, topicName, 
+                                                  infoForm.getMergedFormID()&0xffffff,
+                                                  name.substring(infoSep+1));
+                File mergedFile = new File(mergedName);
+                FileInputStream in = new FileInputStream(file);
+                FileOutputStream out = new FileOutputStream(mergedFile);
+                int length = (int) file.length();
+                byte[] buffer = new byte[length];
+                in.read(buffer);
+                out.write(buffer);
+                out.close();
+                in.close();
+            }
+        }
+    }
+
+    /**
+     * Delete a directory and any subdirectories
+     *
+     * @param       directory           The directory to be deleted
+     */
+    private void deleteDirectoryTree(File directory) {
+
+        //
+        // Delete files and subdirectories for the directory
+        //
+        File[] files = directory.listFiles();
+        for (File file : files) {
+            if (file.isDirectory())
+                deleteDirectoryTree(file);
+            else
+                file.delete();
+        }
+
+        //
+        // Delete the directory
+        //
+        directory.delete();
+    }
+
+    /**
+     * Builds a map of deleted INFOs for each plugin to be merged. This occurs in two stages:
+     * - The existing map is compared against the DIAL group of this plugin to see if any of
+     *   the deleted INFOs are present but not deleted. This is made necessary because deleted
+     *   records do NOT carry subrecord info with them, so that info must be gotten from the 
+     *   record in a "previous" plugin before deletion.
+     * - Then the plugin is scanned to add any INFO records that the plugin itself deletes that
+     *   has not been already deleted.
+     * To work proprly, this must be run on the plugin list in "reverse" order; that is, with 
+     * the last plugin to be merged run first and so on.
+     * 
+     * @param	Map<Integer, List<PluginRecord>>	Map of deleted INFO records (cannot be null)
+     * @return                      void
+     */
+    public void buildDeletedINFOMap(Plugin plugin, Map<Integer, List<PluginRecord>> deletedMap)
+    {
+    	PluginGroup dialogueGroup = plugin.getTopGroup("DIAL");
+    	if (dialogueGroup == null || deletedMap == null) return;
+ 		List<PluginRecord> groupList = dialogueGroup.getRecordList();
+		for (PluginRecord dialOrInfo : groupList) // First update records currently in the map
+		{
+			if (dialOrInfo instanceof PluginGroup) // INFO Group
+			{
+				int topicID = ((PluginGroup)dialOrInfo).getGroupParentID();
+				if (!deletedMap.containsKey(topicID)) continue;
+				List<PluginRecord> infoList = ((PluginGroup)dialOrInfo).getRecordList();
+				List<PluginRecord> deletedList = deletedMap.get(topicID);
+		        ListIterator<PluginRecord> lit1 = deletedList.listIterator();
+		        while (lit1.hasNext())
+		        {
+		            PluginRecord delRec = lit1.next();
+					ListIterator<PluginRecord> lit2 = infoList.listIterator();
+			        while (lit2.hasNext())
+			        {
+			            PluginRecord rec = lit2.next();
+			            if (!rec.isDeleted() && rec.getFormID() == delRec.getFormID())
+			            {
+			            	lit1.set(rec);
+			            	break;
+			            }
+					}
+				}
+			}			
+		}
+		for (PluginRecord dialOrInfo : groupList) // Now add deleted records not currently in the map
+		{
+			if (dialOrInfo instanceof PluginGroup) // INFO Group
+			{
+				PluginGroup topicGroup = (PluginGroup)dialOrInfo; 
+				int topicID = topicGroup.getGroupParentID();
+				List<PluginRecord> newDelList = topicGroup.getDeletedPluginRecords();
+				if (!newDelList.isEmpty() && !deletedMap.containsKey(topicID)) // Just add it.
+				{
+					deletedMap.put(topicID, newDelList);
+				}
+				else // records must be added if not already on list.
+				{
+					List<PluginRecord> deletedList = deletedMap.get(topicID);
+					for (PluginRecord delRec : newDelList)
+					{
+				        ListIterator<PluginRecord> lit = deletedList.listIterator();
+				        boolean alreadyPresent = false;
+				        while (lit.hasNext())
+				        {
+				            PluginRecord rec = lit.next();
+				            if (rec.getFormID() == delRec.getFormID()) // Already on list
+				            {
+				            	alreadyPresent = true;
+				            	break;
+				            }
+				            if (!alreadyPresent) lit.add(delRec);
+						}
+					}
+				}
+			}			
+		}
+    }
+    
+    /**
+     * Fires up a popup asking for the base form ID to start renumbering from. The initial
+     * value is the highest form ID in the current plugin. If the entered hex value is either
+     * not a number or lower than the initial, then -1 is returned. Else the first value to
+     * start with is returned.
+     * SACarrow, 1 Feb 2008
+     *
+     * @param       baseID                popup event action string
+     */
+ 	private int getStartFormID(int baseID)
+ 	{
+ 		int retVal = -1;
+ 		String inputID = (String)JOptionPane.showInputDialog(
+                 parentWindow, "<html>Please enter the starting form ID <i>in hex</i>"
+                 + "\n(Numbering will start at this number plus one):",
+                 "New Starting Form ID", JOptionPane.PLAIN_MESSAGE,
+                 null, null, String.format("%08X", baseID));
+ 		if (inputID == null) return retVal;
+ 		try
+ 		{
+ 			retVal = Integer.parseInt(inputID, 16);
+ 		}
+ 		catch (Exception ex)
+ 		{
+             JOptionPane.showMessageDialog(parentWindow,
+             		"Value entered: \"" + inputID + "\" is not a valid number.",
+                     "Entry Error", JOptionPane.ERROR_MESSAGE);
+             return -1;
+ 		}
+ 		if (retVal < baseID)
+ 		{
+             JOptionPane.showMessageDialog(parentWindow,
+             		"Number entered: \"" + String.format("%08X", retVal) + "\" is too small.",
+                     "Entry Error", JOptionPane.ERROR_MESSAGE);
+             return -1;
+ 		}
+ 		return retVal; 
+ 	}
+
+    /**
+     * Search all form IDs of this plugin, returning the highest formID
+     * currently in use. Even though there may be gaps in form ID, the 
+     * next value available and all higher are guaranteed unused.
+     * SACarrow 01/01/08
+     *
+     * @param       pl                    plugin
+     */
+    private int highestFormID(Plugin pl)
+    {
+    	List<FormInfo> allForms = pl.getFormList();
+    	int highFormID = allForms.get(0).getFormID();
+    	for (FormInfo form : allForms)
+    	{
+    		int formID = form.getFormID();
+    		if (formID > highFormID) highFormID = formID;
+    	}
+    	return highFormID;
+    }
+
+}

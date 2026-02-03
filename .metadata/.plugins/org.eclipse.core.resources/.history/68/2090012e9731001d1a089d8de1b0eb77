@@ -1,0 +1,144 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.ListIterator;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+import javax.swing.tree.*;
+
+/**
+ * Dialog to display the data for a subrecord
+ */
+public class DisplaySubrecordDialog extends JDialog implements ActionListener {
+
+    /**
+     * Create the display dialog
+     *
+     * @param       parent          Parent window for the dialog
+     * @param       subrecord       The subrecord to display
+     */
+    public DisplaySubrecordDialog(JDialog parent, PluginSubrecord subrecord) {
+        super(parent, "Subrecord Data", true);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        byte[] subrecordData;
+        
+        //
+        // Get the subrecord data
+        //
+        try {
+            subrecordData = subrecord.getSubrecordData();
+        } catch (IOException exc) {
+            Main.logException("Exception while getting subrecord data", exc);
+            subrecordData = new byte[0];
+        }
+        
+        //
+        // Convert the subrecord data to hexadecimal
+        //
+        StringBuilder dumpData = new StringBuilder(128+3*subrecordData.length+6*(subrecordData.length/16));
+        dumpData.append(String.format("%s subrecord: Data length x'%X'\n", 
+                                      subrecord.getSubrecordType(), subrecordData.length));
+        dumpData.append("\n       0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
+        StringBuilder dumpHex = new StringBuilder(48);
+        StringBuilder dumpLine = new StringBuilder(16);
+        
+        for (int i=0; i<subrecordData.length; i+=16) {
+            for (int j=0; j<16; j++) {
+                int offset = i+j;
+                if (offset == subrecordData.length)
+                    break;
+                
+                dumpHex.append(String.format(" %02X",  subrecordData[offset]));
+                if (subrecordData[offset] >= 0x20 && subrecordData[offset] < 0x7f)
+                    dumpLine.append(new String(subrecordData, offset, 1));
+                else
+                    dumpLine.append(".");
+            }
+            
+            while (dumpHex.length() < 48)
+                dumpHex.append("   ");
+            
+            while (dumpLine.length() < 16)
+                dumpLine.append(" ");
+            
+            dumpData.append(String.format("%04X:", i));
+            dumpData.append(dumpHex);
+            dumpData.append("  *");
+            dumpData.append(dumpLine);
+            dumpData.append("*");
+            if (i+16 < subrecordData.length)
+                dumpData.append("\n");
+            
+            dumpHex.delete(0, 48);
+            dumpLine.delete(0,16);
+        }
+        
+        //
+        // Create the text area containing the hexadecimal record data
+        //
+        JTextArea textArea = new JTextArea(dumpData.toString());
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
+        
+        //
+        // Create the buttons
+        //
+        JPanel buttonPane = new JPanel();
+        buttonPane.setBackground(Main.backgroundColor);
+
+        JButton button = new JButton("Done");
+        button.setActionCommand("done");
+        button.setHorizontalAlignment(SwingConstants.CENTER);
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        //
+        // Set up the content pane
+        //
+        JPanel contentPane = new JPanel();
+        contentPane.setLayout(new BoxLayout(contentPane, BoxLayout.Y_AXIS));
+        contentPane.setOpaque(true);
+        contentPane.setBackground(Main.backgroundColor);
+        contentPane.setBorder(BorderFactory.createEmptyBorder(30, 30, 30, 30));
+        contentPane.add(scrollPane);
+        contentPane.add(Box.createVerticalStrut(15));
+        contentPane.add(buttonPane);
+        setContentPane(contentPane);                    
+    }
+
+    /**
+     * Show the dialog
+     *
+     * @param       parent          Parent window for the dialog
+     * @param       subrecord       The subrecord to display
+     */
+    public static void showDialog(JDialog parent, PluginSubrecord subrecord) {
+        DisplaySubrecordDialog dialog = new DisplaySubrecordDialog(parent, subrecord);
+        dialog.pack();
+        dialog.setLocationRelativeTo(parent);
+        dialog.setVisible(true);
+    }
+    
+    /**
+     * Action performed (ActionListener interface)
+     *
+     * @param       ae              Action event
+     */
+    public void actionPerformed(ActionEvent ae) {
+        try {
+            String action = ae.getActionCommand();
+            if (action.equals("done")) {
+                setVisible(false);
+                dispose();                
+            }            
+        } catch (Throwable exc) {
+            Main.logException("Exception while processing action event", exc);
+        }       
+    }
+}

@@ -1,0 +1,1223 @@
+package TES4Gecko;
+
+import java.io.*;
+import java.net.URI;
+import java.net.URL;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Properties;
+import java.util.zip.DataFormatException;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+
+/**
+ * Generate response files for a plugin
+ */
+public class GenerateTask extends WorkerTask {
+    
+    /** Plugin file */
+    private File pluginFile;
+        
+    /** Plugin */
+    private Plugin plugin;
+        
+    /** The voice data */
+    private byte[] voiceData;
+    
+    /** Map of voice data with differing lengths of silence **/
+    private Map<Integer, byte[]> voiceDataMap;
+    
+    /** Map of lip-synch data with differing lengths of silence **/
+    private Map<Integer, byte[]> lipSynchDataMap;
+    
+    /** Maximum seconds of silence in an MP3.
+     *  Longer lengths get this max length **/
+    private static final int maxSecondsSilence = 15;      
+        
+    /** Words per second of silence **/
+    private static final int wordsPerSecondSilence = 4;      
+    
+    /** Oblivion uses one response in the HELLO topic of the Generic quest to 
+     *  indicate "ABOVE HERE ARE GREETINGS THAT CAN LINK TO OTHER GREETINGS."
+     *  Apparently to make sure that that response is never called, they use 
+     *  a bogus NPC ID in the CTDA for that response. If the NPC cannot be found,
+     *  it should be checked against this number before panicking. Basically 
+     *  only applicable if cloning the Generic quest.
+     */
+    private static final int bogusNPCFormID = 0x00010583;      
+        
+    /** Race list (RACE) */
+    private List<PluginRace> raceList;
+        
+    /** Race map */
+    private Map<Integer, PluginRace> raceMap;
+        
+    /** NPC list (NPC_) */
+    private List<PluginNPC> npcList;
+        
+    /** NPC map */
+    private Map<Integer, PluginNPC> npcMap;
+        
+    /** Quest list (QUST) [full records] */
+    private List<PluginRecord> questList;
+        
+    /** Quest map */
+    private Map<Integer, PluginRecord> questMap;
+        
+    /** Dialog topic list (DIAL) */
+    private List<PluginTopic> topicList;
+        
+    /** Dialog topic map */
+    private Map<Integer, PluginTopic> topicMap;
+
+    static private JFrame parentWindow;
+    
+    static private int numInfosProcessed = 0;
+    static private int numFilesCreated = 0;
+
+    
+   /**
+     * Create a task instance
+     *
+     * @param       statusDialog    The status dialog
+     * @param       pluginFile      The plugin file
+     */
+    public GenerateTask(StatusDialog statusDialog, File pluginFile) {
+        super(statusDialog);
+        this.pluginFile = pluginFile;
+    }
+
+    /**
+     * Generate the response files
+     *
+     * @param       parent          The parent frame
+     * @param       pluginFile      The plugin file
+     */
+    public static void generateResponses(JFrame parent, File pluginFile) {
+        
+    	parentWindow = parent;
+        //
+        // Create the status dialog
+        //
+        StatusDialog statusDialog = new StatusDialog(parent, " ", "Create Silent Voice Files");
+        
+        //
+        // Create the worker task
+        //
+        GenerateTask worker = new GenerateTask(statusDialog, pluginFile);
+        statusDialog.setWorker(worker);
+        
+        //
+        // Start the worker thread and wait for completion
+        //
+        worker.start();
+        statusDialog.showDialog();
+        
+        //
+        // Display the completion message
+        //
+        if (statusDialog.getStatus() == 1)
+            JOptionPane.showMessageDialog(parent,
+            		"Silent voice files created for " + pluginFile.getName() + "\n" + numFilesCreated +
+            		" files created for " + numInfosProcessed + " INFO records.",
+                                          "Create Silent Voice Files", JOptionPane.INFORMATION_MESSAGE);
+        else
+            JOptionPane.showMessageDialog(parent, "Unable to create silent voice files for "+pluginFile.getName(),
+                                          "Create Silent Voice Files", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * Run the executable code for the thread
+     */
+    public void run() {
+        boolean completed = false;
+        numInfosProcessed = 0;
+        numFilesCreated = 0;
+
+        try {
+
+            int selection = JOptionPane.showConfirmDialog(parentWindow, 
+                    "<html>This operation will remove <b>all</b> of the files currently in the voice \n" +
+                    "directory of this plugin. Even if this is the desired behavior, that\n" +
+                    "voice directory should be backed up before executing this action.\n" +
+                    "Do you still want to do this?",
+                    "Create Silent Voice Files: " + pluginFile.getName(),
+                    JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (selection != JOptionPane.YES_OPTION) return;
+
+
+            //
+            // Read the silent voice file.  The file must be located in the
+            // same directory as TES4Gecko.jar and must be called
+            // TES4Gecko-Silence.mp3.  Note that a URL contains escaped blank
+            // characters (%20), so we need to convert the URL to a URI in order
+            // to use the URI getPath() method, which will unescape the characters.
+            // Remember though that the class may not be in a JAR, particularly
+            // when debugging in Eclipse. :)
+            URL fileURL = Main.class.getResource("Main.class");
+            String geckoPath = "Gecko path: " + fileURL.getFile() + "\n";
+            if (fileURL == null)
+                throw new IOException("Unable to locate Main class");
+
+            String filePath = fileURL.getPath();
+            int sep = filePath.indexOf(':');
+            if (sep < 1)
+                throw new IOException("Main class path is not valid");
+
+            String protocol = fileURL.getProtocol();
+            if (!protocol.equals("file") && !protocol.equals("jar"))
+                throw new IOException("Main class path protocol is not valid");
+
+            // Not-so-unified method of extracting main class location, whether in a JAR file
+            // or in the file system as in debugging:
+            // - Find the substring NOT including the trailing "/TES4Gecko/Main.class",
+            // - In the remaining string, get the substring bracketed by the first occurrence 
+            //   of "/" [inclusive] and the last [exclusive].
+            String firstCut = filePath.substring(0, filePath.indexOf("/Main.class"));
+            String uriString = firstCut.substring(firstCut.indexOf('/'));
+            if (uriString.contains("!"))
+            {
+            	uriString = uriString.substring(0, uriString.lastIndexOf('!'));
+            	uriString = uriString.substring(0, uriString.lastIndexOf('/'));
+            }
+            URI fileURI = new URI(uriString);
+            filePath = fileURI.getPath().substring(1);
+            File voiceFile = new File(filePath + Main.fileSeparator + "TES4Gecko-Silence.mp3");
+            if (!voiceFile.exists() || !voiceFile.isFile())
+                throw new IOException("'"+voiceFile.getPath()+"' does not exist");
+
+            voiceData = new byte[(int)voiceFile.length()];
+            FileInputStream in = new FileInputStream(voiceFile);
+            in.read(voiceData);
+            in.close();
+            
+            // Here we try to load the different-length files. If any of them fail, then
+            // the popup to change the options never appears.
+            voiceDataMap = new HashMap<Integer, byte[]>();
+            lipSynchDataMap = new HashMap<Integer, byte[]>();
+            for (int i = 1; i <= maxSecondsSilence; i++)
+            {
+            	String silenceFilePath = String.format(filePath + "/TES4Gecko-Silence%02d.mp3", i);
+            	File silenceFile = new File(silenceFilePath);
+            	String lipSynchFilePath = String.format(filePath + "/TES4Gecko-Silence%02d.lip", i);
+            	File lipSynchFile = new File(lipSynchFilePath);
+                if (!silenceFile.exists() || !silenceFile.isFile())
+                {
+                	// If they all aren't there, just use the old way.
+                	voiceDataMap.clear();
+                	lipSynchDataMap.clear();
+                	break;
+                }
+                else
+                {
+                    byte[] silenceData = new byte[(int)silenceFile.length()];
+                    FileInputStream inSilence = new FileInputStream(silenceFile);
+                    inSilence.read(silenceData);
+                    inSilence.close();
+                    voiceDataMap.put(i, silenceData);
+                }
+                // Lip-synch files are not mandatory. If not available, simply put a one-byte array
+                // in that slot. That will be checked for at the time of generation.
+                byte[] lipSynchData = new byte[(lipSynchFile.exists() && lipSynchFile.isFile()) ? (int)lipSynchFile.length() : 1];
+                if (lipSynchData.length > 1) // Only true if file exists
+                {
+                    FileInputStream inLipSynch = new FileInputStream(lipSynchFile);
+                    inLipSynch.read(lipSynchData);
+                    inLipSynch.close();
+                }
+                lipSynchDataMap.put(i, lipSynchData);
+            }
+
+            //
+            // Load the plugin
+            //
+            plugin = new Plugin(pluginFile);
+            plugin.load(this);
+            int numInfos = getNumberInfos(plugin);
+            List<PluginGroup> groupList = plugin.getGroupList();
+            List<String> masterList = plugin.getMasterList();
+            Master[] masters = new Master[masterList.size()];
+
+            //
+            // Load the master files referenced by the plugin
+            //
+            int index = 0;
+            for (String masterName : masterList) {
+                File masterFile = new File(pluginFile.getParent()+Main.fileSeparator+masterName);
+                Master master = new Master(masterFile);
+                master.load(this);
+                masters[index++] = master;
+            }
+
+            //
+            // Allocate the cross-reference lists
+            //
+            raceList = new ArrayList<PluginRace>(32);
+            raceMap = new HashMap<Integer, PluginRace>(32);
+            npcList = new ArrayList<PluginNPC>(3072);
+            npcMap = new HashMap<Integer, PluginNPC>(3072);
+            questList = new ArrayList<PluginRecord>(512);
+            questMap = new HashMap<Integer, PluginRecord>(512);
+            topicList = new ArrayList<PluginTopic>(4096);
+            topicMap = new HashMap<Integer, PluginTopic>(4096);
+
+            //
+            // Delete existing voice files for the plugin
+            //
+            File voiceBase = new File(pluginFile.getParent()+Main.fileSeparator+"Sound"+
+                                      Main.fileSeparator+"Voice"+Main.fileSeparator+plugin.getName());
+            if (voiceBase.exists())
+            {
+                getStatusDialog().updateMessage("Deleting existing voice files");
+                if (voiceBase.isDirectory())
+                    deleteDirectoryTree(voiceBase);
+                else
+                    voiceBase.delete();
+            }
+
+            //
+            // Build the cross-reference lists for the plugin
+            //
+            getStatusDialog().updateMessage("Building cross-reference lists");
+            PluginRace race;
+            PluginNPC npc;
+            PluginQuest quest;
+            PluginTopic topic;
+            for (PluginGroup group : groupList) {
+                String groupRecordType = group.getGroupRecordType();
+                List<PluginRecord> recordList = group.getRecordList();
+                if (groupRecordType.equals("RACE")) {
+                    for (PluginRecord record : recordList) {
+                        if (record.getRecordType().equals("RACE") && !record.isIgnored()) {
+                            if (record.isDeleted()) {
+                                race = new PluginRace(record.getFormID());
+                                race.setDelete(true);
+                            } else {
+                                race = buildRaceEntry(record);
+                            }
+
+                            raceList.add(race);
+                            raceMap.put(new Integer(race.getFormID()), race);
+                        }
+                    }
+                } else if (groupRecordType.equals("NPC_")) {
+                    for (PluginRecord record : recordList) {
+                        if (record.getRecordType().equals("NPC_") && !record.isIgnored()) {
+                            if (record.isDeleted()) {
+                                npc = new PluginNPC(record.getFormID());
+                                npc.setDelete(true);
+                            } else {
+                                npc = buildNPCEntry(record);
+                            }
+
+                            npcList.add(npc);
+                            npcMap.put(new Integer(npc.getFormID()), npc);
+                        }
+                    }
+                } else if (groupRecordType.equals("QUST")) {
+                    for (PluginRecord record : recordList) {
+                        if (record.getRecordType().equals("QUST") && !record.isIgnored()) {
+                            if (record.isDeleted()) {
+                                quest = new PluginQuest(record.getFormID());
+                                quest.setDelete(true);
+                            } else {
+                                quest = buildQuestEntry(record);
+                            }
+
+                            questList.add(record);
+                            questMap.put(new Integer(quest.getFormID()), record);
+                        }
+                    }
+                } else if (groupRecordType.equals("DIAL")) {
+                    for (PluginRecord record : recordList) {
+                        if (record.getRecordType().equals("DIAL") && !record.isIgnored()) {
+                            if (record.isDeleted()) {
+                                topic = new PluginTopic(record.getFormID());
+                                topic.setDelete(true);
+                            } else {
+                                topic = buildTopicEntry(record);
+                            }
+
+                            topicList.add(topic);
+                            topicMap.put(new Integer(topic.getFormID()), topic);
+                        }
+                    }                                                
+                }
+            }
+
+            //
+            // Update the cross-reference lists for each master.  We need to adjust the
+            // file number in the form ID based on the position of the master within the
+            // plugin master list. SAC: Updating this code as each record in a new master
+            // was previously assumed to be new to that master, which is not the case if
+            // an entry is a modification from  previous master. Also now the masters are 
+            // traversed in reverse order so that overriding entries are placed first.
+            //
+            List<String> masterListInCaps = plugin.getMasterList(); // To clarify comparisons.
+            ListIterator<String> lit = masterListInCaps.listIterator();
+            while (lit.hasNext()) // To eliminate comparison snafus.
+            {
+            	String tmpMaster = lit.next();
+            	lit.set(tmpMaster.toUpperCase());
+            }
+            for (int masterID=masters.length-1; masterID > -1; masterID--) {
+                Master master = masters[masterID];
+                List<FormInfo> formList = master.getFormList();
+                List<String> masterListforMaster = master.getMasterList();
+
+                for (FormInfo formInfo : formList)
+                {
+                	int newMasterID = masterID; // Default value.
+                    String recordType = formInfo.getRecordType();
+                    if (recordType.equals("RACE") || recordType.equals("NPC_")
+                     || recordType.equals("QUST") || recordType.equals("DIAL"))
+                    {
+                    	// Determining the master ID to set for this form ID. If
+                    	// greater than or equal to  the size of this master's own master list, 
+                    	// let it be. Else determine the position of that master in
+                    	// the overall master list and use that index.
+                        int formMasterID = (formInfo.getFormID()&0xFF000000) >> 24;
+            			if (formMasterID < masterListforMaster.size())
+            			{
+            				String formMasterName = masterListforMaster.get(formMasterID);
+            				String raceFormID = String.format("%08X", formInfo.getFormID());
+            				int pluginMasterIdx = masterListInCaps.indexOf(formMasterName.toUpperCase());
+            				if (pluginMasterIdx == -1)
+            				{
+                        		if (Main.debugMode)
+                        		{
+                                   System.out.printf("GenerateTask: Form ID %08X is modified in <%s> from the original in <%s>; " 
+                                		   + " but <%s> is not in the master list for plugin <%s>.\n",
+                                		   formInfo.getFormID(), master.getName(), formMasterName, formMasterName, plugin.getName());
+                        		}
+            				}
+            				else newMasterID = pluginMasterIdx;
+            			}
+                    }
+                    if (recordType.equals("RACE")) {
+                        PluginRecord record = master.getRecord(formInfo.getFormID());
+                        race = buildRaceEntry(record);
+                        int formID = (race.getFormID()&0x00ffffff) | (newMasterID<<24);
+                        Integer objFormID = new Integer(formID);
+                        if (raceMap.get(objFormID) == null) {
+                            raceList.add(race);
+                            raceMap.put(objFormID, race);
+                        }
+                    } else if (recordType.equals("NPC_")) {
+                        PluginRecord record = master.getRecord(formInfo.getFormID());
+                        npc = buildNPCEntry(record);
+                        int formID = (npc.getFormID()&0x00ffffff) | (newMasterID<<24);
+                        Integer objFormID = new Integer(formID);
+                        if (npcMap.get(objFormID) == null) {
+                            npcList.add(npc);
+                            npcMap.put(objFormID, npc);
+                        }
+                    } else if (recordType.equals("QUST")) {
+                        PluginRecord record = master.getRecord(formInfo.getFormID());
+                        quest = buildQuestEntry(record);
+                        int formID = (quest.getFormID()&0x00ffffff) | (newMasterID<<24);
+                        Integer objFormID = new Integer(formID);
+                        if (questMap.get(objFormID) == null) {
+                            questList.add(record);
+                            questMap.put(objFormID, record);
+                        }
+                    } else if (recordType.equals("DIAL")) {
+                        PluginRecord record = master.getRecord(formInfo.getFormID());
+                        topic = buildTopicEntry(record);
+                        int formID = (topic.getFormID()&0x00ffffff) | (newMasterID<<24);
+                        Integer objFormID = new Integer(formID);
+                        if (topicMap.get(objFormID) == null) {
+                            topicList.add(topic);
+                            topicMap.put(objFormID, topic);
+                        }
+                    }
+                }
+            }
+
+            //
+            // Process the plugin dialog records and copy the voice file for each response.
+            // We ignore any INFO records that override a master record since the master
+            // voice files are owned by the master and not by the plugin.
+            //
+            getStatusDialog().updateMessage("Creating silent voice files for "+pluginFile.getName());
+            for (PluginGroup group : groupList) {
+                String groupRecordType = group.getGroupRecordType();
+                if (groupRecordType.equals("DIAL")) {
+                    List<PluginRecord> recordList = group.getRecordList();
+                    for (PluginRecord record : recordList) {
+                        if (record.getRecordType().equals("GRUP")) {
+                            PluginGroup infoGroup = (PluginGroup)record;
+                            int topicID = infoGroup.getGroupParentID();
+                            List<PluginRecord> infoList = infoGroup.getRecordList();
+                            for (PluginRecord infoRecord : infoList) {
+                                if (infoRecord.getRecordType().equals("INFO") && 
+                                                    !infoRecord.isIgnored() && !infoRecord.isDeleted()) {
+                                    int masterID = infoRecord.getFormID()>>>24;
+                                    if (masterID >= masterList.size())
+                                    {
+                                    	numFilesCreated += createResponseFiles(topicID, infoRecord);
+                                        numInfosProcessed++;
+                                        if (numInfosProcessed % 100 == 0)
+                                        	this.getStatusDialog().updateProgress((int)(100 * numInfosProcessed/numInfos));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            completed = true;
+        } catch (PluginException exc) {
+            Main.logException("Plugin Error", exc);
+        } catch (DataFormatException exc) {
+            Main.logException("Compression Error", exc);
+        } catch (IOException exc) {
+            Main.logException("I/O Error", exc);
+        } catch (InterruptedException exc) {
+            WorkerDialog.showMessageDialog(getStatusDialog(), "Request canceled", "Interrupted", JOptionPane.ERROR_MESSAGE);
+        } catch (Throwable exc) {
+            Main.logException("Exception while generating responses", exc);
+        }
+
+        //
+        // All done
+        //
+        getStatusDialog().closeDialog(completed);
+    }
+
+    /**
+     * Build a race entry
+     *
+     * @param       record                  The plugin record
+     * @return                              The race entry
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    private PluginRace buildRaceEntry(PluginRecord record) throws DataFormatException, IOException, PluginException {
+        int raceFormID = record.getFormID();
+        int maleFormID = raceFormID;
+        int femaleFormID = raceFormID;
+        boolean playableRace = false;
+        String raceName = null;
+
+        //
+        // Process the subrecords
+        //
+        // The FULL subrecord contains the null-terminated race name
+        //
+        // The VNAM subrecord contains the male and female voice override form IDs.
+        // The defining race is used if the VNAM record is not present or the override
+        // value is 0.
+        //
+        // Byte 32 of the DATA subrecord is x'01' for a playable race.
+        //
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("FULL")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (subrecordData.length > 1)
+                    raceName = new String(subrecordData, 0, subrecordData.length-1);
+            } else if (subrecordType.equals("VNAM")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (subrecordData.length >= 4) {
+                    int formID = SerializedElement.getInteger(subrecordData, 0);
+                    if (formID != 0)
+                        maleFormID = formID;
+                }
+
+                if (subrecordData.length >= 8) {
+                    int formID = SerializedElement.getInteger(subrecordData, 4);
+                    if (formID != 0)
+                        femaleFormID = formID;
+                }
+            } else if (subrecordType.equals("DATA")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (subrecordData.length >= 33 && (subrecordData[32]&0x01) != 0)
+                    playableRace = true;
+            }
+        }
+
+        if (raceName == null)
+            raceName = record.getEditorID();
+
+        return new PluginRace(raceFormID, record.getEditorID(), raceName, playableRace, maleFormID, femaleFormID);
+    }
+
+    /**
+     * Build an NPC entry
+     *
+     * @param       record                  The plugin record
+     * @return                              The NPC entry
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    private PluginNPC buildNPCEntry(PluginRecord record) throws DataFormatException, IOException, PluginException {
+        int formID = record.getFormID();
+        int raceID = 0;
+        boolean female = false;
+
+        //
+        // Process the subrecords
+        //
+        // The RNAM subrecord contains the race form ID
+        //
+        // Byte 0 of the ACBS record is x'01' if the NPC is female.
+        //
+        List<PluginSubrecord> subrecordList = record.getSubrecords();
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("RNAM")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (subrecordData.length >= 4)
+                    raceID = SerializedElement.getInteger(subrecordData, 0);
+            } else if (subrecordType.equals("ACBS")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                if (subrecordData.length >= 1 && (subrecordData[0]&0x01) != 0)
+                    female = true;
+            }
+        }
+
+        return new PluginNPC(formID, record.getEditorID(), raceID, female);
+    }
+
+    /**
+     * Build a quest entry
+     *
+     * @param       record                  The plugin record
+     * @return                              The quest entry
+     */
+    private PluginQuest buildQuestEntry(PluginRecord record) {
+        return new PluginQuest(record.getFormID(), record.getEditorID());
+    }
+
+    /**
+     * Build a dialog topic entry
+     *
+     * @param       record                  The plugin record
+     * @return                              The topic entry
+     */
+    private PluginTopic buildTopicEntry(PluginRecord record) {
+        return new PluginTopic(record.getFormID(), record.getEditorID());
+    }
+
+    /**
+     * Create the response files for a dialog information unit
+     *
+     * @param       topicID                 The dialog topic ID
+     * @param       infoRecord              The dialog information record
+     * @exception   DataFormatException     Error while expanding the record data
+     * @exception   IOException             An I/O error occurred
+     * @exception   PluginException         The record data is not valid
+     */
+    private int createResponseFiles(int topicID, PluginRecord infoRecord) 
+                                throws DataFormatException, IOException, PluginException {
+        List<PluginSubrecord> subrecordList = infoRecord.getSubrecords();
+        int infoID = infoRecord.getFormID()&0x00ffffff;
+        int responseCount = 0;
+        int questID = 0;
+        int npcID = 0;
+        int raceID = 0;
+        List<Integer> respNums = new ArrayList<Integer>();
+        List<Integer> voiceIdx = new ArrayList<Integer>();
+        //
+        // Process the information subrecords
+        //
+        // The QSTI subrecord contains the quest identifier.
+        //
+        // The CTDA subrecord contains the response conditions.  We will use the
+        // GetIsID (0x48) and GetIsRace (0x45) functions to restrict the number of 
+        // response files required.
+        //
+        //   Byte  00: Comparison type
+        //   Bytes 04-07: Comparison value (IEEE single-precision floating-point format)
+        //   Bytes 08-11: Function code
+        //   Bytes 12-15: Parameter 1
+        //   Bytes 16-19: Parameter 2
+        //
+        // The TRDT subrecord marks the beginning of a response (each response
+        // consists of TRDT/NAM1/NAM2 subrecords)
+        //
+        // To try to limit the number of files generated, we try to do some primitive
+        // filtering based on NPC & race conditions in both the quest and response. The
+        // heuristics are as follows and yes, the right ANDs & ORs will defeat this. Oh well.
+        // - Start with the base list of undeleted playable races.
+        // - At both the quest and response level, separately form a list of the:
+        //   * Included NPCs (GetIsID == 1),
+        //   * Included races (GetIsRace == 1),
+        //   * Excluded races (GetIsRace == 0).
+        // The first category is dealt with differently than the other two. The NPCs at the quest 
+        // level are simply combined with those at the response level with all unique race/gender pairs 
+        // kept; these combos may include unplayable or deleted races.
+        // For the races, the union of the {included races} and {undeleted playable races - excluded races}
+        // at the quest level is made; this is then intersected with the set generated the same way at the
+        // response level. This approach my still generated unnecessary files when those three condition
+        // types are combined, but since they usually aren't, not worrying about it. The greater concern is
+        // trying not to leave out files while still making some attempt at minimization. 
+        // UPDATE: Keeping the above comment section intact 'cause this is a WiP, but the last two paragraphs
+        // currently do not apply. Right now there are two main rules governing which races and genders get
+        // the silent files created:
+        // * Each of the restriction groups above OVERRIDE the others, with the first listed being of the highest
+        //   priority. If there is ONE NPC selected, then races that are included do not matter; if a single
+        //   inclusion, exclusions are not inspected.
+        // * At the response level, the following rules are also applied, but only to whatever survived the
+        //   tests at the quest level. So at the response level, nothing matters if there are NPCs selected
+        //   at the quest level. Also inclusions are matched against the remaining set as well as exclusions, if
+        //   there are no inclusions. We'll see where this takes us. :) 
+        
+        Map<Integer, Boolean> responseNPCs = new HashMap<Integer, Boolean>();
+        List<Integer> responseIncludedNPCs = new ArrayList<Integer>();
+        List<Integer> responseExcludedRaces = new ArrayList<Integer>();
+        List<Integer> responseIncludedRaces = new ArrayList<Integer>();
+        for (PluginSubrecord subrecord : subrecordList) {
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("QSTI")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                questID = SerializedElement.getInteger(subrecordData, 0);
+            } else if (subrecordType.equals("CTDA")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                int code = SerializedElement.getInteger(subrecordData, 8);
+                if (subrecordData[0] == 0 && (code == 0x48 || code == 0x45)) {
+                    int bits = SerializedElement.getInteger(subrecordData, 4);
+                    float value = Float.intBitsToFloat(bits);
+                    int formID = SerializedElement.getInteger(subrecordData, 12);
+                    if (value == 1.0)
+                    {
+                        if (code == 0x48)
+                        {
+                            npcID = formID;
+                            responseIncludedNPCs.add(npcID);
+                        }
+                        else
+                        {
+                            raceID = formID;
+                            responseIncludedRaces.add(raceID);
+                        }
+                    }
+                    else if (value == 0.0)
+                    {
+                        if (code == 0x485)
+                        {
+                            int raceIDEx = formID;
+                            responseExcludedRaces.add(raceIDEx);
+                        }
+                    }
+                }
+            }
+            else if (subrecordType.equals("TRDT"))
+            {
+                responseCount++;
+                byte[] subrecordData = subrecord.getSubrecordData();
+                respNums.add(new Integer(subrecordData[12]));
+            }
+            else if (subrecordType.equals("NAM1"))
+            {
+            	if (this.voiceDataMap.size() == 0)
+            	{
+            		voiceIdx.add(0); // Use old-style silence
+            		continue;
+            	}
+                byte[] subrecordData = subrecord.getSubrecordData();
+                String respLine = new String(subrecordData, 0, subrecordData.length-1).trim();
+                if (respLine.equals(""))
+            	{
+            		voiceIdx.add(1); // Use 1 sec silence
+            		continue;
+            	}
+                String[] numWords = respLine.split("[^\\w'\\-]+");
+                int secsOfSilence = numWords.length / wordsPerSecondSilence;
+                secsOfSilence = ((secsOfSilence + 1 < maxSecondsSilence) ? secsOfSilence + 1 : maxSecondsSilence);
+        		voiceIdx.add(secsOfSilence);
+            }
+        }
+
+        //
+        // Nothing to do if there are no responses or the dialog topic is not associated with a quest
+        //
+        if (responseCount == 0 || questID == 0)
+            return 0;
+
+        //
+        // Get the dialog topic
+        //
+        PluginTopic topic = topicMap.get(new Integer(topicID));
+        if (topic == null) {
+            String text = String.format("Topic %08X not found");
+            throw new PluginException(text);
+        }
+
+        if (topic.isDeleted()) {
+            String text = String.format("Topic %08X is deleted", topicID);
+            throw new PluginException(text);
+        }
+
+        String topicName = topic.getEditorID();
+
+        //
+        // Get the quest
+        //
+        PluginRecord quest = questMap.get(new Integer(questID));
+        if (quest == null) {
+            String text = String.format("Quest %08X not found for dialog topic %s",  questID, topicName);
+            throw new PluginException(text);
+        }
+
+        if (quest.isDeleted()) {
+            String text = String.format("Quest %08X is deleted", questID);
+            throw new PluginException(text);
+        }
+
+        int filesCreated = 0;
+        String questName = quest.getEditorID();
+        // Process those quest subrecords for the CTDAs.
+        List<PluginSubrecord> questSubrecordList = quest.getSubrecords();
+        List<Integer> questIncludedNPCs = new ArrayList<Integer>();
+        List<Integer> questExcludedRaces = new ArrayList<Integer>();
+        List<Integer> questIncludedRaces = new ArrayList<Integer>();
+        for (PluginSubrecord subrecord : questSubrecordList)
+        {
+            String subrecordType = subrecord.getSubrecordType();
+            if (subrecordType.equals("CTDA")) {
+                byte[] subrecordData = subrecord.getSubrecordData();
+                int code = SerializedElement.getInteger(subrecordData, 8);
+                if (subrecordData[0] == 0 && (code == 0x48 || code == 0x45)) {
+                    int bits = SerializedElement.getInteger(subrecordData, 4);
+                    float value = Float.intBitsToFloat(bits);
+                    int formID = SerializedElement.getInteger(subrecordData, 12);
+                    if (value == 1.0)
+                    {
+                        if (code == 0x48)
+                        {
+                            questIncludedNPCs.add(formID);
+                        }
+                        else
+                        {
+                            questIncludedRaces.add(formID);
+                        }
+                    }
+                    else if (value == 0.0)
+                    {
+                        if (code == 0x485)
+                        {
+                        	questExcludedRaces.add(formID);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Figure out the races first; initially filtering with the quest
+        List<PluginRace> racesQuestLevel = new ArrayList<PluginRace>();
+    	// Process race inclusions; check for playability not performed for a specific inclusion.
+        if (questIncludedNPCs.size() == 0)
+        {
+        	if (questIncludedRaces.size() > 0)
+        	{
+                for (PluginRace race : raceList)
+                {
+                    if (!race.isDeleted()) // race.isPlayableRace() not done here.
+                    {
+                    	if (questIncludedRaces.contains(race.getFormID()))
+                    	{
+                    		racesQuestLevel.add(race);
+                    	}
+                    }
+                }        		
+        	}
+            else if (questExcludedRaces.size() > 0)
+            {
+                for (PluginRace race : raceList)
+                {
+                    if (race.isPlayableRace() && !race.isDeleted()) 
+                    {
+                    	if (!questExcludedRaces.contains(race.getFormID()))
+                    	{
+                    		racesQuestLevel.add(race);
+                    	}
+                    }
+            	}
+            }
+            else // If no NPC or race conditions, take the whole [playable] race list.
+            {
+                for (PluginRace race : raceList)
+                {
+                    if (race.isPlayableRace() && !race.isDeleted()) 
+                    {
+                    	racesQuestLevel.add(race);
+                    }
+            	}
+            }
+        }
+
+        // Now use the filtered set as the starting point for the response.
+        List<PluginRace> racesResponseLevel = new ArrayList<PluginRace>();
+        if (questIncludedNPCs.size() == 0) // If there are quest NPCs, ignore all response stuff.
+        {
+            if (responseIncludedNPCs.size() == 0) // Process race inclusions
+            {
+            	if (responseIncludedRaces.size() > 0)
+            	{
+                    for (PluginRace race : racesQuestLevel)
+                    {
+                    	if (responseIncludedRaces.contains(race.getFormID()))
+                    	{
+                    		racesResponseLevel.add(race);
+                    	}
+                    }        		
+            	}
+                else if (responseExcludedRaces.size() > 0)
+                {
+                    for (PluginRace race : racesQuestLevel)
+                    {
+                    	if (!responseExcludedRaces.contains(race.getFormID()))
+                    	{
+                    		racesResponseLevel.add(race);
+                    	}
+                    }
+                }
+                else // If no NPC or race conditions, take the quest race list.
+                {
+                	racesResponseLevel = racesQuestLevel;
+                }
+            }
+        }
+
+        // This list equals one of the NPC lists if the other is size zero;
+        // else it is the intersection of the two.
+        List<Integer> intersectNPCList = new ArrayList<Integer>();
+        if (questIncludedNPCs.size() == 0 && responseIncludedNPCs.size() > 0)
+        	intersectNPCList = responseIncludedNPCs;
+        else if (questIncludedNPCs.size() > 0 && responseIncludedNPCs.size() == 0)
+        	intersectNPCList = questIncludedNPCs;
+        else
+        {
+            for (int npc : questIncludedNPCs)
+            {
+               	if (responseIncludedNPCs.contains(npc))
+               	{
+               		intersectNPCList.add(npc);
+                }
+            }
+        }
+        // Now copy for the filtered race list.
+        for (PluginRace race : racesResponseLevel) 
+        {
+        	filesCreated += copyVoiceData(questName, topicName, infoID, race, false, respNums, voiceIdx);
+        	filesCreated += copyVoiceData(questName, topicName, infoID, race, true, respNums, voiceIdx); 
+        }
+        // Now for the NPC list, but only if the race is not already done.
+        for (int tmpNPCID : intersectNPCList)
+        {
+  	      PluginNPC npc = npcMap.get(new Integer(tmpNPCID));
+	      if (npc == null)
+	      {
+	    	  String text = "";
+	    	  if (npcID != bogusNPCFormID)
+	    	  {
+		          text = String.format("NPC %08X not found for dialog topic %s (%08X) in quest %s (%08X)\n",
+		        		  tmpNPCID, topicName, infoID, questName, questID);
+		          System.out.printf(text);
+	    	  }
+	          if (npcID == bogusNPCFormID) // Bogus ID used in responses that are never to be called.
+	          	continue;
+	          else
+	          	throw new PluginException(text);
+	      }
+	
+	      if (npc.isDeleted())
+	      {
+	          String text = String.format("NPC %08X is deleted", npcID);
+	          throw new PluginException(text);
+	      }
+          raceID = npc.getRaceID();
+          PluginRace race = raceMap.get(raceID);
+          if (race == null) {
+              String text = String.format("Race %08X not found for NPC %s", raceID, npc.getEditorID());
+              throw new PluginException(text);
+          }
+
+          if (race.isDeleted()) {
+              String text = String.format("Race %08X is deleted", raceID);
+              throw new PluginException(text);
+          }
+          // If racesQuestLevel & responseIncludedNPCs are both non-empty, this means that any NPCs 
+          // were defined at the response level, so we screen for NPC races with the quest race list. This  
+          // helps to remove vestigial responses that get left in when quests are cloned. NOTE: Actually
+          // racesQuestLevel is always at least set to the set of all playable races. However NPCs may be
+          // of unplayable races, so a check for that must be included.
+          if (racesQuestLevel.size() > 0 && responseIncludedNPCs.size() > 0)
+          {
+        	  if (racesQuestLevel.contains(race) || !race.isPlayableRace())
+        	  {
+        		  filesCreated += copyVoiceData(questName, topicName, infoID, race, npc.isFemale(), respNums, voiceIdx);
+        		  
+        	  }
+          }
+          else
+          {
+        	  filesCreated += copyVoiceData(questName, topicName, infoID, race, npc.isFemale(), respNums, voiceIdx);          }
+          }
+	
+        
+        
+
+
+
+        //
+        // Create the response files
+        //
+//        if (npcID != 0) {
+//            PluginNPC npc = npcMap.get(new Integer(npcID));
+//            if (npc == null) {
+//                String text = String.format("NPC %08X not found for dialog topic %s (%08X) in quest %s (%08X)\n",
+//                		npcID, topicName, infoID, questName, questID);
+//                System.out.printf(text);
+//                if (npcID == bogusNPCFormID) // Bogus ID used in responses that are never to be called.
+//                	return;
+//                else
+//                	throw new PluginException(text);
+//            }
+//
+//            if (npc.isDeleted()) {
+//                String text = String.format("NPC %08X is deleted", npcID);
+//                throw new PluginException(text);
+//            }
+//
+//            raceID = npc.getRaceID();
+//            PluginRace race = raceMap.get(new Integer(raceID));
+//            if (race == null) {
+//                String text = String.format("Race %08X not found for NPC %s", raceID, npc.getEditorID());
+//                throw new PluginException(text);
+//            }
+//
+//            if (race.isDeleted()) {
+//                String text = String.format("Race %08X is deleted", raceID);
+//                throw new PluginException(text);
+//            }
+//
+//            copyVoiceData(questName, topicName, infoID, race, npc.isFemale(), respNums, voiceIdx);
+//        } else if (raceID != 0) {
+//            PluginRace race = raceMap.get(new Integer(raceID));
+//            if (race == null) {
+//                String text = String.format("Race %08X not found for dialog topic %s", raceID, topicName);
+//                throw new PluginException(text);
+//            }
+//
+//            if (race.isDeleted()) {
+//                String text = String.format("Race %08X is deleted", raceID);
+//                throw new PluginException(text);
+//            }
+//
+//            copyVoiceData(questName, topicName, infoID, race, false, respNums, voiceIdx);
+//            copyVoiceData(questName, topicName, infoID, race, true, respNums, voiceIdx);
+//        } else {
+//            for (PluginRace race : raceList) {
+//                if (race.isPlayableRace() && !race.isDeleted()) {
+//                    copyVoiceData(questName, topicName, infoID, race, false, respNums, voiceIdx);
+//                    copyVoiceData(questName, topicName, infoID, race, true, respNums, voiceIdx);
+//                }
+//            }
+//        }
+        return filesCreated;
+    }
+
+    /** DEPRECATED
+     * Copy the voice data to the response files
+     *
+     * @param       questName           The quest name
+     * @param       topicName           The topic name
+     * @param       infoID              The info ID
+     * @param       race                The race
+     * @param       female              TRUE if the speaker is female
+     * @param       count               The number of response files
+     * @exception   IOException         An I/O error occurred
+     * @exception   PluginException     The record data is not valid
+     */
+    private void copyVoiceData(String questName, String topicName, int infoID, PluginRace race, 
+                               boolean female, int count) throws IOException, PluginException {
+
+        //
+        // Get the race assigned for the voice.  This may not be the same as the current race.
+        // For example, the Khajiit race uses Argonian voices.  It isn't even necessarily
+        // the same for male and female.  For example, male Bretons use Breton voices while
+        // female Bretons use Imperial voices.
+        //
+        int voiceID = (female ? race.getFemaleVoiceID() : race.getMaleVoiceID());
+        PluginRace voiceRace = raceMap.get(new Integer(voiceID));
+        if (voiceRace == null) {
+            String text = String.format("Voice race %08X not found for race %s", voiceID, race.getName());
+            throw new PluginException(text);
+        }
+
+        if (voiceRace.isDeleted()) {
+            String text = String.format("Voice race %08X is deleted", voiceID);
+            throw new PluginException(text);
+        }
+
+        //
+        // Create the voice directory path
+        //
+        String filePath = String.format("%s\\Sound\\Voice\\%s\\%s\\%s",
+                                        pluginFile.getParent(), plugin.getName(), voiceRace.getName(), 
+                                        (female ? "F" : "M"));
+        File voiceDirectory = new File(filePath);
+        if (!voiceDirectory.exists())
+            voiceDirectory.mkdirs();
+
+        //
+        // Create the response files
+        //
+        for (int response=1; response<=count; response++) {
+            String fileName = String.format("%s_%s_%08X_%d.mp3", questName, topicName, infoID, response);
+            File voiceFile = new File(filePath+"\\"+fileName);
+            FileOutputStream out = null;
+            try {
+                out = new FileOutputStream(voiceFile);
+                out.write(voiceData);
+            } finally {
+                if (out != null)
+                    out.close();
+            }
+        }
+    }
+
+    /**
+     * Copy the voice data to the response files. Does not assume that the response numbers are
+     * consecutive; also carries the index of the silence data to use. If index is -1, use the 
+     * classic one. Also checks to see if the file already exists; since all was cleared before
+     * this point, if the file exists, it was already written for another race who shares the 
+     * voice directory, e.g. the Elven races. 
+     *
+     * @param       questName           The quest name
+     * @param       topicName           The topic name
+     * @param       infoID              The info ID
+     * @param       race                The race
+     * @param       female              TRUE if the speaker is female
+     * @param       count               The number of response files
+     * @exception   IOException         An I/O error occurred
+     * @exception   PluginException     The record data is not valid
+     */
+    private int copyVoiceData(String questName, String topicName, int infoID, PluginRace race, 
+                               boolean female, List<Integer> respNums, List<Integer> voiceIdx)
+    throws IOException, PluginException {
+
+        //
+        // Get the race assigned for the voice.  This may not be the same as the current race.
+        // For example, the Khajiit race uses Argonian voices.  It isn't even necessarily
+        // the same for male and female.  For example, male Bretons use Breton voices while
+        // female Bretons use Imperial voices.
+        //
+        int voiceID = (female ? race.getFemaleVoiceID() : race.getMaleVoiceID());
+        PluginRace voiceRace = raceMap.get(new Integer(voiceID));
+        if (voiceRace == null) {
+            String text = String.format("Voice race %08X not found for race %s", voiceID, race.getName());
+            throw new PluginException(text);
+        }
+
+        if (voiceRace.isDeleted()) {
+            String text = String.format("Voice race %08X is deleted", voiceID);
+            throw new PluginException(text);
+        }
+        int filesCreated = 0;
+        //
+        // Create the voice directory path
+        //
+        String filePath = String.format("%s\\Sound\\Voice\\%s\\%s\\%s",
+                                        pluginFile.getParent(), plugin.getName(), voiceRace.getName(), 
+                                        (female ? "F" : "M"));
+        File voiceDirectory = new File(filePath);
+        if (!voiceDirectory.exists())
+            voiceDirectory.mkdirs();
+
+        //
+        // Create the response files
+        //
+        for (int i=0; i < respNums.size(); i++)
+        {
+        	int response = respNums.get(i);
+        	int silenceIdx = voiceIdx.get(i);
+            String fileName = String.format("%s_%s_%08X_%d.mp3", questName, topicName, infoID, response);
+            String lipSynchFileName = String.format("%s_%s_%08X_%d.lip", questName, topicName, infoID, response);
+            File voiceFile = new File(filePath+"\\"+fileName);
+            if (voiceFile.exists()) continue; // No need to overwrite.
+            File lipSynchFile = new File(filePath+"\\"+lipSynchFileName);
+            FileOutputStream out = null;
+            FileOutputStream lipSynchOut = null;
+            try {
+                out = new FileOutputStream(voiceFile);
+                out.write((silenceIdx == 0) ? voiceData : voiceDataMap.get(silenceIdx));
+                filesCreated++;
+                if (silenceIdx > 0 && lipSynchDataMap.get(silenceIdx).length > 1)
+                {
+                	lipSynchOut = new FileOutputStream(lipSynchFile);
+                	lipSynchOut.write(lipSynchDataMap.get(silenceIdx));
+                    filesCreated++;
+                }
+            } finally {
+                if (out != null)
+                    out.close();
+                if (lipSynchOut != null)
+                	lipSynchOut.close();
+            }
+        }
+        return filesCreated;
+    }
+
+    /**
+     * Search all form IDs of this plugin and return those that are
+     * INFOs If there are none, an empty List is returned.
+     * 
+     * NOTE: If there is a presorted list of just INFOs available, 
+     * please either let me know or simply rewrite this.
+     * SACarrow 3 jAN 2008
+     *
+     * @param       pl                    plugin
+     */
+    private int getNumberInfos(Plugin pl)
+    {
+    	int numInfos = 0;
+    	List<FormInfo> allForms = pl.getFormList();
+    	
+    	for (FormInfo form : allForms)
+    	{
+    		if (!form.getRecordType().equals("INFO"))
+    			continue;
+    		numInfos++;
+    	}
+    	return numInfos;
+    }
+    
+    /**
+     * Delete a directory and any subdirectories
+     *
+     * @param       directory       The directory to be deleted
+     */
+    private void deleteDirectoryTree(File directory) {
+
+        //
+        // Delete files and subdirectories for the directory
+        //
+        File[] files = directory.listFiles();
+        for (File file : files) {
+            if (file.isDirectory())
+                deleteDirectoryTree(file);
+            else
+                file.delete();
+        }
+
+        //
+        // Delete the directory
+        //
+        directory.delete();
+    }
+}

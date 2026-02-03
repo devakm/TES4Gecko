@@ -1,0 +1,464 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.zip.DataFormatException;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+
+/**
+ * Dialog to edit the plugin master list
+ */
+public class MasterDialog extends JDialog implements ActionListener {
+    
+    /** Plugin */
+    private Plugin plugin;
+    
+    /** Plugin file */
+    private File pluginFile;
+    
+    /** Master list box */
+    private JList list;
+
+    /**
+     * Create the dialog
+     *
+     * @param       parent          Parent frame
+     * @param       pluginFile      Plugin file
+     * @param       plugin          Plugin
+     */
+    public MasterDialog(JFrame parent, File pluginFile, Plugin plugin) {
+        super(parent, pluginFile.getName(), true);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        this.pluginFile = pluginFile;
+        this.plugin = plugin;
+        
+        //
+        // Display master list for the plugin
+        //
+        list = new JList(plugin.getMasterList().toArray());
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setPrototypeCellValue("mmmmmmmmmmmmmmmmmmmmmmmmm");
+        JScrollPane listPane = new JScrollPane(list);
+        
+        //
+        // Create the buttons
+        //
+        JPanel buttonPane = new JPanel(new GridLayout(0, 1, 0, 10));
+        buttonPane.setBackground(Main.backgroundColor);
+
+        JButton button = new JButton("Rename");
+        button.setActionCommand("rename");
+        button.addActionListener(this);
+        buttonPane.add(button);
+        
+        button = new JButton("Move Up");
+        button.setActionCommand("move up");
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        button = new JButton("Move Down");
+        button.setActionCommand("move down");
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        button = new JButton("Remove");
+        button.setActionCommand("remove");
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        button = new JButton("Done");
+        button.setActionCommand("done");
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        //
+        // Set up the content pane
+        //
+        JPanel contentPane = new JPanel();
+        contentPane.setLayout(new BoxLayout(contentPane, BoxLayout.X_AXIS));
+        contentPane.setOpaque(true);
+        contentPane.setBackground(Main.backgroundColor);
+        contentPane.setBorder(BorderFactory.createEmptyBorder(30, 30, 30, 30));
+        contentPane.add(listPane);
+        contentPane.add(Box.createHorizontalStrut(15));
+        contentPane.add(buttonPane);
+        setContentPane(contentPane);                    
+    }
+
+    /**
+     * Show the dialog
+     *
+     * @param       parent          Parent frame
+     * @param       pluginFile      Plugin file
+     * @param       plugin          Plugin
+     */
+    public static void showDialog(JFrame parent, File pluginFile, Plugin plugin) {
+        MasterDialog dialog = new MasterDialog(parent, pluginFile, plugin);
+        dialog.pack();
+        dialog.setLocationRelativeTo(parent);
+        dialog.setVisible(true);
+    }
+    
+    /**
+     * Action performed (ActionListener interface)
+     *
+     * @param       ae              Action event
+     */
+    public void actionPerformed(ActionEvent ae) {
+        try {
+            String action = ae.getActionCommand();
+            if (action.equals("rename")) {
+                renameMaster();
+            } else if (action.equals("move up")) {
+                moveMaster(-1);
+            } else if (action.equals("move down")) {
+                moveMaster(1);
+            } else if (action.equals("remove")) {
+                removeMaster();
+            } else if (action.equals("done")) {
+                setVisible(false);
+                dispose();                
+            }
+            
+            if (plugin == null && isVisible()) {
+                setVisible(false);
+                dispose();
+            }
+        } catch (Throwable exc) {
+            Main.logException("Exception while processing action event", exc);
+        }   
+    }
+    
+    /**
+     * Rename a master list entry
+     */
+    private void renameMaster() {
+        
+        //
+        // A list element must be selected
+        //
+        if (list.isSelectionEmpty()) {
+            JOptionPane.showMessageDialog(this, "You must select a master list entry to rename",
+                                          "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        int index = list.getSelectedIndex();
+        
+        //
+        // Get the new master
+        //
+        JFileChooser chooser = new JFileChooser(Main.pluginDirectory);
+        chooser.setDialogTitle("Select Master File");
+        chooser.setFileFilter(new PluginFileFilter(true, true, false));
+        if (chooser.showDialog(this, "Select") != JFileChooser.APPROVE_OPTION)
+            return;
+        
+        String newName = chooser.getSelectedFile().getName();
+
+        //
+        // Rename the master list entry
+        //
+        List<String> masterList = plugin.getMasterList();
+        String oldName = masterList.get(index);
+        masterList.set(index, newName);
+        if (SaveTask.savePlugin(this, pluginFile, plugin)) {
+            list.setListData(masterList.toArray());
+        } else {
+            masterList.set(index, oldName);
+            list.clearSelection();
+        }
+    }
+    
+    /**
+     * Move a master list entry up or down
+     *
+     * @param       move            Change in list position
+     */
+    private void moveMaster(int move) {
+        boolean moveValid = false;
+        List<String> masterList = plugin.getMasterList();
+        List<FormInfo> formList = plugin.getFormList();
+        
+        //
+        // A list element must be selected
+        //
+        if (list.isSelectionEmpty()) {
+            JOptionPane.showMessageDialog(this, "You must select a master list entry to move",
+                                          "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        int index = list.getSelectedIndex();
+        
+        //
+        // Nothing to do if moving the first element up or the last element down
+        //
+        int newIndex = index+move;
+        if (newIndex < 0 || newIndex >= masterList.size())
+            return;
+        
+        //
+        // Build the new master list
+        //
+        int masterCount = masterList.size();
+        List<String> newMasterList = new ArrayList<String>(masterCount);
+        int[] masterMap = new int[masterCount];
+        for (int i=0; i<masterCount; i++) {
+            masterMap[i] = i;
+            newMasterList.add(masterList.get(i));
+        }
+
+        masterMap[index] = newIndex;
+        newMasterList.set(index, masterList.get(newIndex));
+        masterMap[newIndex] = index;
+        newMasterList.set(newIndex, masterList.get(index));
+        
+        FormAdjust formAdjust = new FormAdjust(masterMap, masterCount);
+
+        //
+        // Update the master references
+        //
+        try {
+            for (FormInfo formInfo : formList) {
+                PluginRecord record = (PluginRecord)formInfo.getSource();
+                if (record == null || record.isIgnored())
+                    continue;
+                
+                //
+                // Update subrecord references
+                //
+                record.updateReferences(formAdjust);
+                
+                //
+                // Adjust the record form ID
+                //
+                int formID = record.getFormID();
+                int masterID = formID>>>24;
+                formID &= 0x00ffffff;
+                if (masterID < masterCount)
+                    formID |= masterMap[masterID]<<24;
+                else
+                    formID |= masterCount<<24;
+                
+                record.changeFormID(formID);
+            }
+            
+            moveValid = true;
+        } catch (PluginException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "Plugin Error", JOptionPane.ERROR_MESSAGE);
+        } catch (DataFormatException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "Compression Error", JOptionPane.ERROR_MESSAGE);
+        } catch (IOException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "I/O Error", JOptionPane.ERROR_MESSAGE);
+        } catch (Throwable exc) {
+            Main.logException("Master list update failed", exc);
+        }
+        
+        //
+        // Save the updated plugin
+        //
+        if (moveValid) {
+            plugin.setMasterList(newMasterList);
+            if (SaveTask.savePlugin(this, pluginFile, plugin))
+                list.setListData(newMasterList.toArray());
+        }
+        
+        //
+        // Reload the plugin to rebuild the record mappings
+        //
+        plugin = LoadTask.loadPlugin(this, pluginFile);
+        list.clearSelection();
+    }
+    
+    /**
+     * Remove a master list entry
+     */
+    private void removeMaster() {
+        boolean removeValid = false;
+        boolean yesToAll = false;
+        boolean noToAll = false;
+        
+        //
+        // A list element must be selected
+        //
+        if (list.isSelectionEmpty()) {
+            JOptionPane.showMessageDialog(this, "You must select a master list entry to remove",
+                                          "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        int index = list.getSelectedIndex();
+        List<String> masterList = plugin.getMasterList();
+        List<FormInfo> formList = plugin.getFormList();
+        
+        //
+        // Build the new master list
+        //
+        int masterCount = masterList.size();
+        List<String> newMasterList = new ArrayList<String>(masterCount-1);
+        int[] masterMap = new int[masterCount];
+        for (int i=0; i<masterCount; i++) {
+            if (i == index) {
+                masterMap[i] = -1;
+            } else {
+                masterMap[i] = newMasterList.size();
+                newMasterList.add(masterList.get(i));
+            }
+        }
+        
+        //
+        // Update the references for each record in the plugin
+        //
+        try {
+            for (FormInfo formInfo : formList) {
+                PluginRecord record = (PluginRecord)formInfo.getSource();
+                if (record == null || record.isIgnored())
+                    continue;
+                
+                //
+                // Process the subrecords for the current record
+                //
+                List<PluginSubrecord> subrecords = record.getSubrecords();
+                for (PluginSubrecord subrecord : subrecords) {
+                    byte[] subrecordData = subrecord.getSubrecordData();
+                    int[][] references = subrecord.getReferences();
+                    if (references == null || references.length == 0)
+                        continue;
+                  
+                    //
+                    // Process each reference in the current subrecord
+                    //
+                    for (int i=0; i<references.length; i++) {
+                        int offset = references[i][0];
+                        int formID = references[i][1];
+                        if (formID == 0)
+                            continue;
+                        
+                        int masterID = formID>>>24;
+                        formID &= 0xffffff;
+                        
+                        //
+                        // Notify the user if this reference is for the master we are removing
+                        //
+                        if (masterID == index) {
+                            if (!yesToAll || !noToAll) {
+                                String text = String.format("%s record %s (%08X) references %s",
+                                                            record.getRecordType(), record.getEditorID(), 
+                                                            record.getFormID(), masterList.get(index));
+                                Object[] options = {"Yes", "No", "Yes to All", "No to All"};
+                                int option = JOptionPane.showOptionDialog(this,
+                                                    text+".  Do you want to delete this record?",
+                                                    "Error", JOptionPane.YES_NO_CANCEL_OPTION,
+                                                     JOptionPane.ERROR_MESSAGE, null, options, options[2]);
+                                if (option == 2) {
+                                    yesToAll = true;
+                                } if (option == 3) {
+                                    noToAll = true;
+                                } else if (option != 0) {
+                                    throw new PluginException(text);
+                                }
+                            }
+                            
+                            if (!noToAll) record.setIgnore(true);
+                            break;
+                        }
+                        
+                        //
+                        // Update the subrecord reference
+                        //
+                        if (masterID < masterCount)
+                            formID |= masterMap[masterID]<<24;
+                        else
+                            formID |= (masterCount-1)<<24;
+     
+                        SerializedElement.setInteger(formID, subrecordData, offset);
+                    }
+                
+                    //
+                    // Stop checking the subrecords if we are going to delete the record
+                    //
+                    if (record.isIgnored())
+                        break;
+
+                    //
+                    // Store the updated the subrecord data
+                    //
+                    subrecord.setSubrecordData(subrecordData);
+                }
+                
+                //
+                // Store the updated subrecords and adjust the record form ID
+                //
+                if (!record.isIgnored()) {
+                    record.setSubrecords(subrecords);
+                    
+                    int formID = record.getFormID();
+                    int masterID = formID>>>24;
+                    formID &= 0x00ffffff;
+                    
+                    if (masterID == index) {
+                        if (!yesToAll) {
+                            String text = String.format("Plugin modifies %s record %s (%08X) in %s",
+                                                        record.getRecordType(), record.getEditorID(), 
+                                                        record.getFormID(), masterList.get(index));
+                            Object[] options = {"Yes", "No", "Yes to All"};
+                            int option = JOptionPane.showOptionDialog(this,
+                                                    text+".  Do you want to remove this modification?",
+                                                    "Error", JOptionPane.YES_NO_CANCEL_OPTION,
+                                                     JOptionPane.ERROR_MESSAGE, null, options, options[2]);
+                            if (option == 2) {
+                                yesToAll = true;
+                            } else if (option != 0) {
+                                throw new PluginException(text);
+                            }
+                        }
+                        
+                        record.setIgnore(true);
+                    } else {
+                        if (masterID < masterCount)
+                            formID |= masterMap[masterID]<<24;
+                        else
+                            formID |= (masterCount-1)<<24;
+                    
+                        record.changeFormID(formID);
+                    }
+                }
+            }
+            
+            removeValid = true;
+        } catch (PluginException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "Plugin Error", JOptionPane.ERROR_MESSAGE);
+        } catch (DataFormatException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "Compression Error", JOptionPane.ERROR_MESSAGE);
+        } catch (IOException exc) {
+            JOptionPane.showMessageDialog(this, exc.getMessage(), "I/O Error", JOptionPane.ERROR_MESSAGE);
+        } catch (Throwable exc) {
+            Main.logException("Master list update failed", exc);
+        }
+        
+        //
+        // Save the updated plugin
+        //
+        if (removeValid) {
+            plugin.setMasterList(newMasterList);
+            if (SaveTask.savePlugin(this, pluginFile, plugin))
+                list.setListData(newMasterList.toArray());
+        }
+        
+        //
+        // Reload the plugin to rebuild the record mappings
+        //
+        plugin = LoadTask.loadPlugin(this, pluginFile);
+        list.clearSelection();
+    }
+}

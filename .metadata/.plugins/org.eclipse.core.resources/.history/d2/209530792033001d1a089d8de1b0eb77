@@ -1,0 +1,139 @@
+package TES4Gecko;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * @author SACarrow
+ * This code represents the various entities that are represented in
+ * subrecord fields. If "other" is specified, a special display method is assumed
+ */
+
+public final class SubrecordDataType
+{
+	private SubrecordDataType() {};
+	
+	public static final int Invalid = -1;
+	public static final int ByteArray = 0;
+	public static final int String = 1;
+	public static final int FormID = 2;
+	public static final int Integer = 3;
+	public static final int Float = 4;
+	public static final int Byte = 5;
+	public static final int StringNoNull = 6;
+	public static final int XYCoordinates = 7;
+	public static final int ContainerItem = 8;
+	public static final int Condition = 9;
+	public static final int Other = 99;
+	public static final int FormatVaries = 100;
+	
+	public static boolean isValid(int param)
+	{
+		return (param == Invalid || 
+				param == ByteArray ||
+				param == String ||
+				param == StringNoNull ||
+				param == FormID ||
+				param == Integer ||
+				param == Float ||
+				param == Byte ||
+				param == XYCoordinates ||
+				param == ContainerItem ||
+				param == Condition ||
+				param == FormatVaries ||
+				param == Other);
+	}
+	private static Map<String, Integer> dataTypeMap;
+	private static Map<Integer, String> dataTypeLabelMap;
+	static
+	{
+		dataTypeMap = new HashMap<String, Integer>();
+		// Form ID data
+		dataTypeMap.put("PNAM", FormID);
+		dataTypeMap.put("QSTI", FormID);
+		dataTypeMap.put("NAME", FormID);
+		dataTypeMap.put("SCRI", FormID);
+		dataTypeMap.put("SCRO", FormID);
+		dataTypeMap.put("XCLR", FormID);
+		dataTypeMap.put("XOWN", FormID);
+		dataTypeMap.put("XGLB", FormID);
+		dataTypeMap.put("XCCM", FormID);
+		dataTypeMap.put("XCWT", FormID);
+		dataTypeMap.put("XCLR", FormID);
+		dataTypeMap.put("XESP", FormID);
+		dataTypeMap.put("XHRS", FormID);
+		dataTypeMap.put("XMRC", FormID);
+		dataTypeMap.put("SNAM", FormID);
+		dataTypeMap.put("ENAM", FormID);
+		dataTypeMap.put("SPLO", FormID);
+		dataTypeMap.put("QNAM", FormID);
+		dataTypeMap.put("BNAM", FormID);
+		dataTypeMap.put("PFIG", FormID);
+		dataTypeMap.put("TCLT", FormID);
+		dataTypeMap.put("TNAM", FormID);
+		
+		// Float data
+		dataTypeMap.put("XCLW", Float);
+		dataTypeMap.put("XSCL", Float);
+		dataTypeMap.put("FLTV", Float);
+		
+		// Integer data
+		dataTypeMap.put("XRNK", Integer);
+		
+		// Single-byte data
+		dataTypeMap.put("XCMT", Byte);
+		dataTypeMap.put("LVLD", Byte);
+		dataTypeMap.put("LVLF", Byte);
+		
+		// String data
+		dataTypeMap.put("EDID", String);
+		dataTypeMap.put("FULL", String);
+		dataTypeMap.put("MODL", String);
+		dataTypeMap.put("MOD2", String);
+		dataTypeMap.put("MOD3", String);
+		dataTypeMap.put("MOD4", String);
+		dataTypeMap.put("DESC", String);
+		dataTypeMap.put("NAM1", String);
+		dataTypeMap.put("NAM2", String);
+		dataTypeMap.put("ICON", String);
+		dataTypeMap.put("ICO2", String);
+		dataTypeMap.put("SCVR", String);
+		dataTypeMap.put("FNAM", String);
+		dataTypeMap.put("GNAM", String);
+		
+		// String data w/o trailing null
+		dataTypeMap.put("SCTX", StringNoNull);
+		
+		// X-Y Coordinate data
+		dataTypeMap.put("XCLC", XYCoordinates);
+		
+		// Data format varies by record type
+		dataTypeMap.put("DATA", FormatVaries);
+	}
+	static
+	{
+		dataTypeLabelMap = new HashMap<Integer, String>();
+		dataTypeLabelMap.put(Invalid, "Invalid");
+		dataTypeLabelMap.put(ByteArray, "Byte Array");
+		dataTypeLabelMap.put(String, "String");
+		dataTypeLabelMap.put(StringNoNull, "String");
+		dataTypeLabelMap.put(FormID, "Form ID");
+		dataTypeLabelMap.put(Integer, "Integer");
+		dataTypeLabelMap.put(Float, "Float");
+		dataTypeLabelMap.put(Byte, "Byte");
+		dataTypeLabelMap.put(XYCoordinates, "X,Y Coordinates");
+		dataTypeLabelMap.put(Other, "Specific");
+	}
+	public static int getDataType(String subrecType)
+	{
+		if (!dataTypeMap.containsKey(subrecType)) return ByteArray;
+		else return dataTypeMap.get(subrecType); 
+	}
+
+	public static String getDataTypeLabel(int subrecDataType)
+	{
+		if (!dataTypeLabelMap.containsKey(subrecDataType)) return "Invalid";
+		else return dataTypeLabelMap.get(subrecDataType); 
+	}
+
+}

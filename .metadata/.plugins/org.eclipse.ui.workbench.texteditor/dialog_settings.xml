@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.GotoLineAction$GotoLineDialog_dialogBounds">
+		<item key="DIALOG_X_ORIGIN" value="605"/>
+		<item key="DIALOG_Y_ORIGIN" value="484"/>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item key="DIALOG_X_ORIGIN" value="1098"/>
+		<item key="DIALOG_HEIGHT" value="362"/>
+		<item key="DIALOG_FONT_NAME" value="1|Tahoma|8.25|0|WINDOWS|1|-11|0|0|0|400|0|0|0|1|0|0|0|0|Tahoma"/>
+		<item key="DIALOG_Y_ORIGIN" value="365"/>
+		<item key="DIALOG_WIDTH" value="243"/>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item key="wholeword" value="false"/>
+		<item key="incremental" value="false"/>
+		<item key="isRegEx" value="false"/>
+		<item key="selection" value="deletedINFOMap"/>
+		<item key="wrap" value="true"/>
+		<item key="casesensitive" value="false"/>
+		<list key="findhistory">
+			<item value="deletedINFOMap"/>
+			<item value="delete"/>
+			<item value="other"/>
+			<item value="mergePlugin"/>
+			<item value="sutu"/>
+			<item value="AddTopic"/>
+			<item value="deletedMap"/>
+			<item value="sutureP"/>
+		</list>
+		<list key="replacehistory">
+			<item value="replaceLandTexID"/>
+			<item value="ReplaceLandTexID"/>
+			<item value="ReplaceBaseRefs"/>
+			<item value="dupeRec"/>
+			<item value="retRec"/>
+			<item value=","/>
+			<item value="their base IDs replaced"/>
+			<item value="response"/>
+		</list>
+	</section>
+</section>

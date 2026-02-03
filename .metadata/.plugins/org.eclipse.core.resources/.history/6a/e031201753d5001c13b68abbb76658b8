@@ -1,0 +1,60 @@
+package TES4Gecko;
+
+import java.awt.Color;
+import java.util.HashMap;
+
+/**
+ * @author SACarrow
+ * The PluginColorMap is a way to map colors to the different ESMs that a plugin
+ * can depend upon. In this way a dev can tell at a glance for a given
+ * object in the file whether it is in fact "owned" by this ESP/M or is altered 
+ * from a previous ESM. The color scheme is as follows:
+ * - Plugin itself (max mod index): White
+ * - The "last" master ESM (max mod index - 1): Yellow
+ * - The "last - 1" master ESM (max mod index - 2): Pink
+ * - The "last - 2" master ESM (max mod index - 3): Cyan
+ * - The "last - 3" master ESM (max mod index - 4): Orange
+ * - The "last - 4" master ESM (max mod index - 5): Magenta
+ * - All other ESMs: Green
+ */
+
+public final class PluginColorMap
+{
+	private PluginColorMap() {}; // Not meant to be instantiated
+
+	private static HashMap<Integer, Color> colorMap = new HashMap(); 
+	private static final Color ThisPlugin = Color.WHITE;
+	private static final Color LastESM = Color.YELLOW;
+	private static final Color LastMinus1ESM = Color.PINK;
+	private static final Color LastMinus2ESM = Color.CYAN;
+	private static final Color LastMinus3ESM = Color.ORANGE;
+	private static final Color LastMinus4ESM = Color.MAGENTA;
+	private static final Color AllOtherESM = Color.GREEN;
+	private static Color colorArray[] = {ThisPlugin, LastESM, LastMinus1ESM, LastMinus2ESM, LastMinus3ESM, LastMinus4ESM, AllOtherESM};
+
+	static
+	{
+		colorMap.put(0, LastESM);
+		colorMap.put(1, ThisPlugin);		
+	}
+	
+	/**
+	 * Trashes the old color map and sets up a new one based on the # of masters.
+	 * Note that masters start at index 0.  
+	 * @param numMasters
+	 */
+	public static void setColorMap(int numMasters)
+	{
+		colorMap.clear();
+		for (int i = numMasters, j = 0; i >= 0; i--, j++)
+		{
+			colorMap.put(i, (j > 6) ? colorArray[6] : colorArray[i]);
+		}
+	}
+	public static Color getPluginColor(int modIndex)
+	{
+		if (colorMap.containsKey(modIndex) return colorMap.get(modIndex);
+		return AllOtherESM;
+	}
+	
+}

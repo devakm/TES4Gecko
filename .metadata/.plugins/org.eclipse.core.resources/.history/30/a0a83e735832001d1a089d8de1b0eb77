@@ -1,0 +1,101 @@
+package TES4Gecko;
+
+import java.io.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.ListIterator;
+
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.swing.event.*;
+import javax.swing.tree.*;
+
+/**
+ * Dialog to display the data for a subrecord
+ */
+public class DisplaySubrecordDialog extends JDialog implements ActionListener {
+
+    /**
+     * Create the display dialog
+     *
+     * @param       parent          Parent window for the dialog
+     * @param       subrecord       The subrecord to display
+     */
+    public DisplaySubrecordDialog(JDialog parent, PluginSubrecord subrecord) {
+        super(parent, "Subrecord Data: " + subrecord.getSubrecordType(), true);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        
+        // Set the label showing how he data is displayed.
+        JLabel displayTypeLabel = new JLabel("<html><b>Subrecord data displayed as " +
+        		subrecord.getDisplayDataypeLabel() + "</b></html>");
+        displayTypeLabel.setHorizontalAlignment(SwingConstants.LEFT);
+        JPanel displayTypePane = new JPanel();
+        displayTypePane.setBackground(Color.BLUE);
+        displayTypePane.add(displayTypeLabel);
+        
+        //
+        // Create the text area containing the record data
+        //
+        JTextArea textArea = new JTextArea(subrecord.getDisplayData());
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        
+        //
+        // Create the buttons
+        //
+        JPanel buttonPane = new JPanel();
+        buttonPane.setBackground(Main.backgroundColor);
+
+        JButton button = new JButton("Done");
+        button.setActionCommand("done");
+        button.setHorizontalAlignment(SwingConstants.CENTER);
+        button.addActionListener(this);
+        buttonPane.add(button);
+
+        //
+        // Set up the content pane
+        //
+        JPanel contentPane = new JPanel();
+        contentPane.setLayout(new BoxLayout(contentPane, BoxLayout.Y_AXIS));
+        contentPane.setOpaque(true);
+        contentPane.setBackground(Main.backgroundColor);
+        contentPane.setBorder(BorderFactory.createEmptyBorder(30, 30, 30, 30));
+        contentPane.add(displayTypeLabel);
+        contentPane.add(scrollPane);
+        contentPane.add(Box.createVerticalStrut(15));
+        contentPane.add(buttonPane);
+        setContentPane(contentPane);                    
+    }
+
+    /**
+     * Show the dialog
+     *
+     * @param       parent          Parent window for the dialog
+     * @param       subrecord       The subrecord to display
+     */
+    public static void showDialog(JDialog parent, PluginSubrecord subrecord) {
+        DisplaySubrecordDialog dialog = new DisplaySubrecordDialog(parent, subrecord);
+        dialog.pack();
+        dialog.setLocationRelativeTo(parent);
+        dialog.setVisible(true);
+    }
+    
+    /**
+     * Action performed (ActionListener interface)
+     *
+     * @param       ae              Action event
+     */
+    public void actionPerformed(ActionEvent ae) {
+        try {
+            String action = ae.getActionCommand();
+            if (action.equals("done")) {
+                setVisible(false);
+                dispose();                
+            }            
+        } catch (Throwable exc) {
+            Main.logException("Exception while processing action event", exc);
+        }       
+    }
+}

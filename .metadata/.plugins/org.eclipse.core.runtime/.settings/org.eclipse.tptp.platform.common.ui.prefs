@@ -1,0 +1,4 @@
+#Sat Jan 17 23:27:53 EST 2009
+org.eclipse.hyades.ui.filters.internal.defaultFilters.org.eclipse.hyades.trace.views=true
+eclipse.preferences.version=1
+switch_to_perspective=always

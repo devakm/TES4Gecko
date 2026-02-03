@@ -1,0 +1,124 @@
+package TES4Gecko;
+
+/**
+ *  A SerializedElement is an object that is stored as a byte stream.
+ */
+public class SerializedElement {
+    
+    /** 
+     * Create a new instance of SerializedElement 
+     */
+    public SerializedElement() {
+    }
+    
+    /**
+     * Compare two byte arrays
+     *
+     * @param       arrayA          First array
+     * @param       positionA       Starting position in first array
+     * @param       arrayB          Second array
+     * @param       positionB       Starting position in second array
+     * @param       count           Number of elements to compare
+     */
+    public static int compareArrays(byte[] arrayA, int positionA, byte[] arrayB, int positionB, int count) {
+        int diff = 0;
+        int indexA = positionA;
+        int indexB = positionB;
+        for (int i=0; i<count; i++) {
+            if (arrayA[indexA] != arrayB[indexB]) {
+                if (arrayA[indexA] > arrayB[indexB])
+                    diff = 1;
+                else
+                    diff = -1;
+                
+                break;
+            }
+            
+            indexA++;
+            indexB++;
+        }
+        
+        return diff;
+    }
+    
+    /**
+     * Convert from little-endian format to short integer value
+     *
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     * @return                      Integer value
+     */
+    public static int getShort(byte[] buffer, int offset) {
+        return ((int)buffer[offset+0]&255) | (((int)buffer[offset+1]&255)<<8);
+    }
+
+    /**
+     * Convert from short integer value to little-endian format
+     *
+     * @param       number          The number to be converted
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     */
+    public static void setShort(int number, byte[] buffer, int offset) {
+        buffer[offset] = (byte)number;
+        buffer[offset+1] = (byte)(number>>>8);
+    }    
+    
+    /**
+     * Convert from little-endian format to integer value
+     *
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     * @return                      Integer value
+     */
+    public static int getInteger(byte[] buffer, int offset) {
+        return ((int)buffer[offset+0]&255) | (((int)buffer[offset+1]&255)<<8) | 
+                        (((int)buffer[offset+2]&255)<<16) | (((int)buffer[offset+3]&255)<<24);
+    }
+
+    /**
+     * Convert from integer value to little-endian format
+     *
+     * @param       number          The number to be converted
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     */
+    public static void setInteger(int number, byte[] buffer, int offset) {
+        buffer[offset] = (byte)number;
+        buffer[offset+1] = (byte)(number>>>8);
+        buffer[offset+2] = (byte)(number>>>16);
+        buffer[offset+3] = (byte)(number>>>24);
+    }
+    
+    /**
+     * Convert from little-endian format to long integer value
+     *
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     * @return                      Long value
+     */
+    public static long getLong(byte[] buffer, int offset) {
+        return ((long)buffer[offset+0]&255) | (((long)buffer[offset+1]&255)<<8) | 
+                        (((long)buffer[offset+2]&255)<<16) | (((long)buffer[offset+3]&255)<<24) |
+                        (((long)buffer[offset+4]&255)<<32) | (((long)buffer[offset+5]&255)<<40) |
+                        (((long)buffer[offset+6]&255)<<48) | (((long)buffer[offset+7]&255)<<56);
+    }
+
+    /**
+     * Convert from long integer value to little-endian format
+     *
+     * @param       number          The number to be converted
+     * @param       buffer          The byte buffer
+     * @param       offset          Offset into the byte buffer
+     */
+    public static void setLong(long number, byte[] buffer, int offset) {
+        buffer[offset] = (byte)number;
+        buffer[offset+1] = (byte)(number>>>8);
+        buffer[offset+2] = (byte)(number>>>16);
+        buffer[offset+3] = (byte)(number>>>24);
+        buffer[offset+4] = (byte)(number>>>32);
+        buffer[offset+5] = (byte)(number>>>40);
+        buffer[offset+6] = (byte)(number>>>48);
+        buffer[offset+7] = (byte)(number>>>56);
+    }
+}

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE templates>
+
+<templates>
+  <template name="Entity CMP EJB">
+    <usage-description />
+    <condition-description />
+    <leave name="ejb.bean:class.cmp-version.2.x" />
+    <leave name="ejb.bean:class.description" />
+    <leave name="ejb.bean:class.display-name.${classname}" />
+    <leave name="ejb.bean:class.local-jndi-name.${classnameWithoutSuffix}HomeLocal" />
+    <leave name="ejb.bean:class.name.${classnameWithoutSuffix}" />
+    <leave name="ejb.bean:class.primkey-field" />
+    <leave name="ejb.bean:class.schema" />
+    <leave name="ejb.bean:class.type.CMP" />
+    <leave name="ejb.bean:class.view-type.local" />
+  </template>
+  <template name="Filter">
+    <usage-description />
+    <condition-description />
+    <leave name="web.filter-init-param:class.name" />
+    <leave name="web.filter-init-param:class.value" />
+    <leave name="web.filter-mapping:class.url-pattern" />
+    <leave name="web.filter:class.description" />
+    <leave name="web.filter:class.display-name" />
+    <leave name="web.filter:class.name" />
+  </template>
+  <template name="Servlet">
+    <usage-description />
+    <condition-description />
+    <leave name="web.servlet-init-param:class.name" />
+    <leave name="web.servlet-init-param:class.value" />
+    <leave name="web.servlet-mapping:class.url-pattern" />
+    <leave name="web.servlet:class.description" />
+    <leave name="web.servlet:class.display-name" />
+    <leave name="web.servlet:class.name" />
+  </template>
+  <template name="Stateful Session EJB">
+    <usage-description />
+    <condition-description />
+    <leave name="ejb.bean:class.description" />
+    <leave name="ejb.bean:class.display-name" />
+    <leave name="ejb.bean:class.jndi-name.${classnameWithoutSuffix}HomeRemote" />
+    <leave name="ejb.bean:class.name.${classnameWithoutSuffix}" />
+    <leave name="ejb.bean:class.type.Stateful" />
+    <leave name="ejb.bean:class.view-type.remote" />
+  </template>
+  <template name="Entity BMP EJB">
+    <usage-description />
+    <condition-description />
+    <leave name="ejb.bean:class.description" />
+    <leave name="ejb.bean:class.display-name.${classname}" />
+    <leave name="ejb.bean:class.local-jndi-name.${classnameWithoutSuffix}HomeLocal" />
+    <leave name="ejb.bean:class.name.${classnameWithoutSuffix}" />
+    <leave name="ejb.bean:class.type.BMP" />
+    <leave name="ejb.bean:class.view-type.local" />
+  </template>
+  <template name="Message Driven EJB">
+    <usage-description />
+    <condition-description />
+    <leave name="ejb.bean:class.acknowledge-mode.Auto-acknowledge" />
+    <leave name="ejb.bean:class.description" />
+    <leave name="ejb.bean:class.destination-type.javax.jms.Queue" />
+    <leave name="ejb.bean:class.display-name" />
+    <leave name="ejb.bean:class.name.${classnameWithoutSuffix}" />
+  </template>
+  <template name="Stateless Session EJB">
+    <usage-description />
+    <condition-description />
+    <leave name="ejb.bean:class.description" />
+    <leave name="ejb.bean:class.display-name" />
+    <leave name="ejb.bean:class.jndi-name.${classnameWithoutSuffix}HomeRemote" />
+    <leave name="ejb.bean:class.name.${classnameWithoutSuffix}" />
+    <leave name="ejb.bean:class.type.Stateless" />
+    <leave name="ejb.bean:class.view-type.remote" />
+  </template>
+</templates>
+

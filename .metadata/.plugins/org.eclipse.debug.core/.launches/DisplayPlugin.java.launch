@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launchConfiguration type="com.genuitec.javascript.debug.launchConfigurationType">
+<stringAttribute key="org.eclipse.atf.config.appPath" value="src/TES4Gecko/DisplayPlugin.java"/>
+<booleanAttribute key="org.eclipse.atf.config.isinternalbrowser" value="true"/>
+<booleanAttribute key="org.eclipse.atf.config.isurl" value="false"/>
+<stringAttribute key="org.eclipse.atf.config.project" value="TES4Gecko"/>
+<stringAttribute key="org.eclipse.atf.config.webmodule" value="TES4Gecko"/>
+<stringAttribute key="org.eclipse.atf.ui.config.fullPath" value=""/>
+<booleanAttribute key="org.eclipse.atf.ui.config.useseverconfig" value="false"/>
+<stringAttribute key="org.eclipse.atf.ui.debug.browserexec" value=""/>
+<stringAttribute key="org.eclipse.atf.ui.debug.processType" value="JavaScript Application"/>
+</launchConfiguration>

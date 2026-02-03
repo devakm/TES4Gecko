@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<item key="org.eclipse.jdt.debug.ui.jre_preference_page_context.columnWidth0" value="126"/>
+	<item key="org.eclipse.jdt.debug.ui.jre_preference_page_context.sortColumn" value="1"/>
+	<item key="org.eclipse.jdt.debug.ui.jre_preference_page_context.columnWidth1" value="160"/>
+	<item key="org.eclipse.jdt.debug.ui.jre_preference_page_context.columnWidth2" value="73"/>
+	<section name="STRING_VALUE_INPUT_DIALOG">
+		<item key="DIALOG_X_ORIGIN" value="623"/>
+		<item key="DIALOG_FONT_NAME" value="1|Tahoma|8.25|0|WINDOWS|1|-11|0|0|0|400|0|0|0|1|0|0|0|0|Tahoma"/>
+		<item key="DIALOG_HEIGHT" value="385"/>
+		<item key="USE_EVALUATION" value="false"/>
+		<item key="DIALOG_Y_ORIGIN" value="333"/>
+		<item key="DIALOG_WIDTH" value="363"/>
+		<item key="WRAP_TEXT" value="true"/>
+	</section>
+	<section name="ADD_VM_DIALOG_SECTION">
+		<item key="DIALOG_X_ORIGIN" value="131"/>
+		<item key="DIALOG_HEIGHT" value="570"/>
+		<item key="DIALOG_FONT_NAME" value="1|Tahoma|8.25|0|WINDOWS|1|-11|0|0|0|400|0|0|0|1|0|0|0|0|Tahoma"/>
+		<item key="DIALOG_Y_ORIGIN" value="-90"/>
+		<item key="DIALOG_WIDTH" value="500"/>
+	</section>
+</section>
