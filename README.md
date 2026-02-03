@@ -14,9 +14,7 @@ Hoffman)
 Credits: For Version 15, Steve would like to thank:
  - ScripterRon and dev_akm for the use of their code and the answering of my 
    stupid questions,
- - The guys at Silgrad Tower (sadly silgrad.com is long defunct now),
-   especially sandor. ST is a pretty demanding mod to work with and the guys there
-   were invaluable with their suggestions, encouragement and patience while testing.
+ - The guys at Silgrad Tower, especially sandor. ST is a pretty demanding mod to work with and the guys there were invaluable with their suggestions, encouragement and patience while testing. Sadly, silgrad.com is long defunct now.
  - bg2408 at BSF for suggestions and observations incorporated into version 15.1.
 
 TES4Gecko Version 13 represents ScripterRon's return to working on 
