@@ -14,7 +14,7 @@ Hoffman)
 Credits: For Version 15, Steve would like to thank:
  - ScripterRon and dev_akm for the use of their code and the answering of my 
    stupid questions,
- - The guys at Silgrad Tower (http://www.silgrad.com/wbb2/portal.php),
+ - The guys at Silgrad Tower (sadly silgrad.com is long defunct now),
    especially sandor. ST is a pretty demanding mod to work with and the guys there
    were invaluable with their suggestions, encouragement and patience while testing.
  - bg2408 at BSF for suggestions and observations incorporated into version 15.1.
@@ -47,9 +47,8 @@ between them.
 Please see the Available Functions section below for critical details and 
 warnings about how individual functions work.
 
-Discussion of TES4Gecko is on the Bethesda Elder Scrolls Construction Set forum 
-(http://www.bethsoft.com/bgsforums/). Search for TES4Gecko if you don't see the 
-thread right away.
+Discussion of TES4Gecko was on the Bethesda Elder Scrolls Construction Set forum 
+bhefore they shut it down.
 
 
 New Features and Changes
